@@ -35,4 +35,5 @@ jobs:
       - name: Consultar preços
         env:
           GOOGLE_WEBHOOK_URL: ${{ secrets.GOOGLE_WEBHOOK_URL }}
+          PROMOTECH_VIA_CHROME: "true"
         run: python monitor_v2_github.py
