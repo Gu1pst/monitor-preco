@@ -59,6 +59,10 @@ PADRAO_VISTA = re.compile(r"R\$\s*([\d.]+,\d{2})\s*(?:à|a)\s+vista", re.IGNOREC
 PADRAO_PARCELADO = re.compile(r"R\$\s*([\d.]+,\d{2})\s*parcelado", re.IGNORECASE)
 
 
+class DesafioVercel(RuntimeError):
+    pass
+
+
 def criar_sessao():
     retry = Retry(
         total=3,
@@ -66,7 +70,8 @@ def criar_sessao():
         read=3,
         status=3,
         backoff_factor=0.7,
-        status_forcelist=(429, 500, 502, 503, 504),
+        # 429 da Vercel é um desafio, não uma falha transitória: não repetir.
+        status_forcelist=(500, 502, 503, 504),
         allowed_methods=frozenset({"GET", "HEAD"}),
     )
     adapter = HTTPAdapter(max_retries=retry, pool_connections=4, pool_maxsize=4)
@@ -279,10 +284,48 @@ def identificar_loja(card, href):
     return None
 
 
-def extrair_ofertas_promotech(sessao, url_promotech):
-    resposta = sessao.get(url_promotech, timeout=TIMEOUT_PAGINA_SEGUNDOS)
-    resposta.raise_for_status()
-    soup = BeautifulSoup(resposta.text, "html.parser")
+def obter_html_promotech(sessao, url_promotech, navegador=None):
+    if navegador is None:
+        resposta = sessao.get(url_promotech, timeout=TIMEOUT_PAGINA_SEGUNDOS)
+        mitigacao = resposta.headers.get("x-vercel-mitigated", "").lower()
+        if resposta.status_code == 429 or mitigacao == "challenge":
+            raise DesafioVercel("A Vercel exigiu um navegador com JavaScript")
+        resposta.raise_for_status()
+        return resposta.text
+
+    try:
+        navegador.get(url_promotech)
+    except TimeoutException:
+        pass
+
+    def pagina_do_produto_carregou(driver):
+        try:
+            texto = chave_texto(driver.find_element(By.TAG_NAME, "body").text)
+        except WebDriverException:
+            return False
+        return "comprar" in texto or "historico de precos" in texto
+
+    try:
+        WebDriverWait(navegador, 15).until(pagina_do_produto_carregou)
+    except TimeoutException:
+        pass
+
+    try:
+        texto_body = chave_texto(navegador.find_element(By.TAG_NAME, "body").text)
+        html = navegador.page_source
+    except WebDriverException as erro:
+        raise RuntimeError(f"Falha ao ler o Promotech pelo Chrome: {erro}") from erro
+
+    if "vercel security checkpoint" in texto_body:
+        raise DesafioVercel("A Vercel também bloqueou o Chrome do GitHub")
+    if not html:
+        raise RuntimeError("O Promotech retornou uma página vazia pelo Chrome")
+    return html
+
+
+def extrair_ofertas_promotech(sessao, url_promotech, navegador=None):
+    html = obter_html_promotech(sessao, url_promotech, navegador)
+    soup = BeautifulSoup(html, "html.parser")
 
     ofertas = []
     lojas_processadas = set()
@@ -357,6 +400,7 @@ def rotina_principal():
     sessao = criar_sessao()
     navegador = None
     navegador_indisponivel = False
+    promotech_via_navegador = False
     produtos_com_oferta = 0
     ofertas_salvas = 0
     falhas = 0
@@ -364,10 +408,39 @@ def rotina_principal():
     for item in PRODUTOS:
         print(f"\nMapeando: {item['nome']}")
         try:
-            ofertas = extrair_ofertas_promotech(sessao, item["urlPromotech"])
+            if promotech_via_navegador:
+                ofertas = extrair_ofertas_promotech(
+                    sessao, item["urlPromotech"], navegador
+                )
+            else:
+                try:
+                    ofertas = extrair_ofertas_promotech(
+                        sessao, item["urlPromotech"]
+                    )
+                except DesafioVercel:
+                    print("  Vercel bloqueou a requisição HTTP; alternando para o Chrome...")
+                    if navegador is None:
+                        navegador = iniciar_navegador()
+                    promotech_via_navegador = True
+                    ofertas = extrair_ofertas_promotech(
+                        sessao, item["urlPromotech"], navegador
+                    )
+        except DesafioVercel as erro:
+            falhas += 1
+            print(f"  Bloqueio geral ao consultar o Promotech: {erro}")
+            break
+        except WebDriverException as erro:
+            navegador_indisponivel = True
+            falhas += 1
+            print(f"  Falha no navegador ao consultar o Promotech: {erro}")
+            break
         except requests.RequestException as erro:
             falhas += 1
             print(f"  Falha ao consultar o Promotech: {erro}")
+            continue
+        except RuntimeError as erro:
+            falhas += 1
+            print(f"  Falha ao processar o Promotech: {erro}")
             continue
 
         if not ofertas:
