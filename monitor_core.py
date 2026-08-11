@@ -1,5 +1,7 @@
 import os
 import re
+import shutil
+import subprocess
 import unicodedata
 from datetime import datetime
 from time import perf_counter
@@ -103,6 +105,33 @@ def chave_texto(valor):
         if not unicodedata.combining(caractere)
     )
 
+def detectar_versao_principal_chrome():
+    for nome in (
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+    ):
+        caminho = shutil.which(nome)
+        if not caminho:
+            continue
+
+        try:
+            resultado = subprocess.run(
+                [caminho, "--version"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            correspondencia = re.search(r"(\d+)\.", resultado.stdout)
+
+            if correspondencia:
+                return int(correspondencia.group(1))
+        except (OSError, subprocess.SubprocessError):
+            continue
+
+    return None
 
 def iniciar_navegador():
     options = uc.ChromeOptions()
@@ -110,14 +139,27 @@ def iniciar_navegador():
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--ignore-certificate-errors")
     options.add_argument("--lang=pt-BR")
-    options.add_argument("--window-size=1365,900")
+    options.add_argument("--window-size=1920,1080")
 
-    navegador = uc.Chrome(options=options, use_subprocess=True)
+    versao_chrome = detectar_versao_principal_chrome()
+
+    if versao_chrome:
+        print(f"Chrome principal detectado: {versao_chrome}")
+        navegador = uc.Chrome(
+            options=options,
+            use_subprocess=True,
+            version_main=versao_chrome,
+        )
+    else:
+        print("Não foi possível detectar a versão do Chrome; usando autodetecção.")
+        navegador = uc.Chrome(
+            options=options,
+            use_subprocess=True,
+        )
+
     navegador.set_page_load_timeout(TIMEOUT_LOJA_SEGUNDOS)
     return navegador
-
 
 def texto_do_elemento(driver, seletor):
     try:
