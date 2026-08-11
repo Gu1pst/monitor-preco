@@ -107,10 +107,12 @@ def chave_texto(valor):
     )
 
 
-def detectar_versao_principal_chrome():
+def detectar_chrome_instalado():
     versao_configurada = os.environ.get("CHROME_VERSION_MAIN", "").strip()
-    if versao_configurada.isdigit():
-        return int(versao_configurada)
+    executavel_configurado = os.environ.get("CHROME_BIN", "").strip()
+
+    if versao_configurada.isdigit() and executavel_configurado:
+        return int(versao_configurada), executavel_configurado
 
     for nome in (
         "google-chrome-stable",
@@ -135,13 +137,13 @@ def detectar_versao_principal_chrome():
 
         correspondencia = re.search(r"(\d+)\.", resultado.stdout)
         if correspondencia:
-            return int(correspondencia.group(1))
+            return int(correspondencia.group(1)), executavel
 
-    return None
+    return None, None
 
 
 def iniciar_navegador():
-    versao_chrome = detectar_versao_principal_chrome()
+    versao_chrome, executavel_chrome = detectar_chrome_instalado()
     options = uc.ChromeOptions()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -157,11 +159,15 @@ def iniciar_navegador():
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             f"Chrome/{versao_chrome}.0.0.0 Safari/537.36"
         )
-        print(f"Chrome principal detectado: {versao_chrome}")
+        print(
+            f"Chrome selecionado: versão {versao_chrome} "
+            f"em {executavel_chrome}"
+        )
         navegador = uc.Chrome(
             options=options,
             use_subprocess=True,
             version_main=versao_chrome,
+            browser_executable_path=executavel_chrome,
         )
     else:
         print("Versão do Chrome não detectada; usando autodetecção.")
