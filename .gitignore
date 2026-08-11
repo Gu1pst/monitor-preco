@@ -1,0 +1,21 @@
+# Credenciais
+.env
+.env.*
+secrets.*
+credentials.*
+cookies.*
+
+# Proxy
+proxy_auth_plugin*
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Chrome/Selenium
+chrome-profile/
+user-data/
+*.log
