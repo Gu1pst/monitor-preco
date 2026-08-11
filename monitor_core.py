@@ -21,6 +21,7 @@ GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
 TIMEOUT_PAGINA_SEGUNDOS = 15
 TIMEOUT_WEBHOOK_SEGUNDOS = 20
 TIMEOUT_LOJA_SEGUNDOS = 18
+TIMEOUT_PROMOTECH_CHROME_SEGUNDOS = 30
 LOJAS_COM_VALIDACAO_DE_VENDEDOR = {"Amazon", "KaBuM"}
 
 LOJAS_VALIDAS = {
@@ -105,46 +106,57 @@ def chave_texto(valor):
         if not unicodedata.combining(caractere)
     )
 
+
 def detectar_versao_principal_chrome():
+    versao_configurada = os.environ.get("CHROME_VERSION_MAIN", "").strip()
+    if versao_configurada.isdigit():
+        return int(versao_configurada)
+
     for nome in (
-        "google-chrome",
         "google-chrome-stable",
+        "google-chrome",
         "chromium",
         "chromium-browser",
     ):
-        caminho = shutil.which(nome)
-        if not caminho:
+        executavel = shutil.which(nome)
+        if not executavel:
             continue
 
         try:
             resultado = subprocess.run(
-                [caminho, "--version"],
+                [executavel, "--version"],
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=10,
             )
-
-            correspondencia = re.search(r"(\d+)\.", resultado.stdout)
-
-            if correspondencia:
-                return int(correspondencia.group(1))
         except (OSError, subprocess.SubprocessError):
             continue
 
+        correspondencia = re.search(r"(\d+)\.", resultado.stdout)
+        if correspondencia:
+            return int(correspondencia.group(1))
+
     return None
 
+
 def iniciar_navegador():
+    versao_chrome = detectar_versao_principal_chrome()
     options = uc.ChromeOptions()
-    options.page_load_strategy = "eager"
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--lang=pt-BR")
     options.add_argument("--window-size=1920,1080")
 
-    versao_chrome = detectar_versao_principal_chrome()
-
     if versao_chrome:
+        # O headless inclui "HeadlessChrome" no User-Agent padrão. Usamos a
+        # plataforma real do runner e a mesma versão principal do navegador.
+        options.add_argument(
+            "--user-agent=Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            f"Chrome/{versao_chrome}.0.0.0 Safari/537.36"
+        )
         print(f"Chrome principal detectado: {versao_chrome}")
         navegador = uc.Chrome(
             options=options,
@@ -152,14 +164,12 @@ def iniciar_navegador():
             version_main=versao_chrome,
         )
     else:
-        print("Não foi possível detectar a versão do Chrome; usando autodetecção.")
-        navegador = uc.Chrome(
-            options=options,
-            use_subprocess=True,
-        )
+        print("Versão do Chrome não detectada; usando autodetecção.")
+        navegador = uc.Chrome(options=options, use_subprocess=True)
 
     navegador.set_page_load_timeout(TIMEOUT_LOJA_SEGUNDOS)
     return navegador
+
 
 def texto_do_elemento(driver, seletor):
     try:
@@ -338,7 +348,9 @@ def obter_html_promotech(sessao, url_promotech, navegador=None):
         return "comprar" in texto or "historico de precos" in texto
 
     try:
-        WebDriverWait(navegador, 15).until(pagina_do_produto_carregou)
+        WebDriverWait(navegador, TIMEOUT_PROMOTECH_CHROME_SEGUNDOS).until(
+            pagina_do_produto_carregou
+        )
     except TimeoutException:
         pass
 
@@ -348,7 +360,10 @@ def obter_html_promotech(sessao, url_promotech, navegador=None):
     except WebDriverException as erro:
         raise RuntimeError(f"Falha ao ler o Promotech pelo Chrome: {erro}") from erro
 
-    if "vercel security checkpoint" in texto_body:
+    pagina_carregada = (
+        "comprar" in texto_body or "historico de precos" in texto_body
+    )
+    if not pagina_carregada and "vercel security checkpoint" in texto_body:
         raise DesafioVercel("A Vercel também bloqueou o Chrome do GitHub")
     if not html:
         raise RuntimeError("O Promotech retornou uma página vazia pelo Chrome")
