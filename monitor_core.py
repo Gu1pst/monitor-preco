@@ -110,19 +110,9 @@ def iniciar_navegador():
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-background-networking")
-    options.add_argument("--blink-settings=imagesEnabled=false")
+    options.add_argument("--ignore-certificate-errors")
     options.add_argument("--lang=pt-BR")
     options.add_argument("--window-size=1365,900")
-    options.add_experimental_option(
-        "prefs",
-        {
-            "profile.managed_default_content_settings.images": 2,
-            "profile.default_content_setting_values.notifications": 2,
-        },
-    )
 
     navegador = uc.Chrome(options=options, use_subprocess=True)
     navegador.set_page_load_timeout(TIMEOUT_LOJA_SEGUNDOS)
@@ -400,10 +390,19 @@ def rotina_principal():
     sessao = criar_sessao()
     navegador = None
     navegador_indisponivel = False
-    promotech_via_navegador = False
+    promotech_via_navegador = os.environ.get(
+        "PROMOTECH_VIA_CHROME", ""
+    ).strip().lower() in {"1", "true", "sim"}
     produtos_com_oferta = 0
     ofertas_salvas = 0
     falhas = 0
+
+    if promotech_via_navegador:
+        print("Promotech configurado para acesso direto pelo Chrome.")
+        try:
+            navegador = iniciar_navegador()
+        except WebDriverException as erro:
+            raise RuntimeError(f"Falha ao iniciar o Chrome: {erro}") from erro
 
     for item in PRODUTOS:
         print(f"\nMapeando: {item['nome']}")
