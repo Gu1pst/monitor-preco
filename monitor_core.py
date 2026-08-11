@@ -305,31 +305,46 @@ def limpar_fragmento_url(url):
     return urlunsplit((partes.scheme, partes.netloc, partes.path, partes.query, ""))
 
 
+def identificar_lojas_pelas_imagens(card):
+    lojas = set()
+    for imagem in card.find_all("img"):
+        texto_imagem = chave_texto(
+            f"{imagem.get('alt', '')} {imagem.get('src', '')}"
+        )
+        for termo, nome in LOJAS_VALIDAS.items():
+            if termo in texto_imagem:
+                lojas.add(nome)
+    return lojas
+
+
 def encontrar_card_da_oferta(link):
     atual = link
     for _ in range(12):
         atual = atual.parent
         if atual is None:
             break
+
         texto = normalizar_texto(atual.get_text(" ", strip=True))
-        if PADRAO_VISTA.search(texto) and PADRAO_PARCELADO.search(texto):
-            return atual
-    return None
+        if not PADRAO_VISTA.search(texto) or not PADRAO_PARCELADO.search(texto):
+            continue
 
+        acoes = {
+            chave_texto(acao.get_text(" ", strip=True))
+            for acao in atual.find_all("a")
+        }
+        if not any("comprar" in acao for acao in acoes):
+            continue
+        if not any("parcelar" in acao for acao in acoes):
+            continue
 
-def identificar_loja(card, href):
-    candidatos = [href]
-    candidatos.extend(
-        imagem.get("alt", "") + " " + imagem.get("src", "")
-        for imagem in card.find_all("img")
-    )
-    candidatos.append(card.get_text(" ", strip=True))
-    texto = chave_texto(" ".join(candidatos))
+        # O resumo no topo mistura a melhor oferta à vista de uma loja com a
+        # melhor parcelada de outra. Um card individual possui exatamente uma
+        # logo de loja; ancestrais que reúnem várias ofertas são descartados.
+        lojas = identificar_lojas_pelas_imagens(atual)
+        if len(lojas) == 1:
+            return atual, lojas.pop()
 
-    for termo, nome in LOJAS_VALIDAS.items():
-        if termo in texto:
-            return nome
-    return None
+    return None, None
 
 
 def obter_html_promotech(sessao, url_promotech, navegador=None):
@@ -387,7 +402,7 @@ def extrair_ofertas_promotech(sessao, url_promotech, navegador=None):
         if "comprar" not in chave_texto(link.get_text(" ", strip=True)):
             continue
 
-        card = encontrar_card_da_oferta(link)
+        card, loja = encontrar_card_da_oferta(link)
         if card is None:
             continue
 
@@ -398,8 +413,7 @@ def extrair_ofertas_promotech(sessao, url_promotech, navegador=None):
             continue
 
         href = limpar_fragmento_url(urljoin(url_promotech, link["href"]))
-        loja = identificar_loja(card, href)
-        if loja is None or loja in lojas_processadas:
+        if loja in lojas_processadas:
             continue
 
         ofertas.append(
@@ -459,6 +473,8 @@ def rotina_principal():
     produtos_com_oferta = 0
     ofertas_salvas = 0
     falhas = 0
+    validacoes_inconclusivas = 0
+    marketplaces_ignorados = 0
 
     if promotech_via_navegador:
         print("Promotech configurado para acesso direto pelo Chrome.")
@@ -534,8 +550,10 @@ def rotina_principal():
 
                 oficial, url_final, motivo = verificar_vendedor_oficial(navegador, oferta)
                 if not oficial:
-                    if not motivo.startswith("Marketplace:"):
-                        falhas += 1
+                    if motivo.startswith("Marketplace:"):
+                        marketplaces_ignorados += 1
+                    else:
+                        validacoes_inconclusivas += 1
                     print(f"    Ignorada: {motivo}")
                     continue
 
@@ -558,7 +576,9 @@ def rotina_principal():
     duracao = perf_counter() - inicio
     print(
         f"\nConcluído em {duracao:.1f}s: {produtos_com_oferta} produtos, "
-        f"{ofertas_salvas} ofertas salvas e {falhas} falhas."
+        f"{ofertas_salvas} ofertas salvas, {marketplaces_ignorados} marketplaces "
+        f"ignorados, {validacoes_inconclusivas} validações inconclusivas "
+        f"e {falhas} falhas reais."
     )
 
     if falhas:
