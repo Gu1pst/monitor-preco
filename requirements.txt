@@ -1,0 +1,4 @@
+beautifulsoup4==4.13.4
+requests==2.32.4
+selenium==4.34.2
+undetected-chromedriver==3.5.5
