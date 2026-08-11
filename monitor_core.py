@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import unicodedata
 from datetime import datetime
 from time import perf_counter
@@ -446,12 +447,19 @@ def enviar_oferta(sessao, item, oferta):
         "fonte": "Promotech",
     }
 
-    resposta = sessao.post(
-        GOOGLE_WEBHOOK_URL,
-        json=pacote,
-        timeout=TIMEOUT_WEBHOOK_SEGUNDOS,
-    )
-    resposta.raise_for_status()
+    for tentativa in range(3):
+        try:
+            resposta = sessao.post(
+                GOOGLE_WEBHOOK_URL,
+                json=pacote,
+                timeout=TIMEOUT_WEBHOOK_SEGUNDOS,
+            )
+            resposta.raise_for_status()
+            return # Se deu certo, sai da função
+        except requests.RequestException as erro:
+            if tentativa == 2:
+                raise
+            time.sleep(2)
 
 
 def rotina_principal():
@@ -473,6 +481,7 @@ def rotina_principal():
     produtos_com_oferta = 0
     ofertas_salvas = 0
     falhas = 0
+    falhas_planilha = 0
     validacoes_inconclusivas = 0
     marketplaces_ignorados = 0
 
@@ -564,8 +573,8 @@ def rotina_principal():
                 enviar_oferta(sessao, item, oferta)
                 ofertas_salvas += 1
             except requests.RequestException as erro:
-                falhas += 1
-                print(f"    Falha ao salvar na planilha: {erro}")
+                falhas_planilha += 1
+                print(f"    Falha ao salvar na planilha após 3 tentativas: {erro}")
 
     if navegador is not None:
         try:
@@ -577,8 +586,8 @@ def rotina_principal():
     print(
         f"\nConcluído em {duracao:.1f}s: {produtos_com_oferta} produtos, "
         f"{ofertas_salvas} ofertas salvas, {marketplaces_ignorados} marketplaces "
-        f"ignorados, {validacoes_inconclusivas} validações inconclusivas "
-        f"e {falhas} falhas reais."
+        f"ignorados, {validacoes_inconclusivas} validações inconclusivas, "
+        f"{falhas_planilha} falhas de planilha e {falhas} falhas reais de raspagem."
     )
 
     if falhas:
