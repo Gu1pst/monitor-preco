@@ -62,6 +62,31 @@ PRODUTOS = [
 PADRAO_VISTA = re.compile(r"R\$\s*([\d.]+,\d{2})\s*(?:à|a)\s+vista", re.IGNORECASE)
 PADRAO_PARCELADO = re.compile(r"R\$\s*([\d.]+,\d{2})\s*parcelado", re.IGNORECASE)
 
+MARCADORES_INDISPONIVEL = (
+    "produto indisponivel",
+    "produto esgotado",
+    "indisponivel no momento",
+    "nao esta mais disponivel",
+    "nao sabemos quando este produto estara disponivel novamente",
+    "avise-me quando chegar",
+    "avise me quando chegar",
+    "avise-me quando disponivel",
+    "sem estoque",
+)
+
+MARCADORES_DISPONIVEL = (
+    "adicionar ao carrinho",
+    "comprar agora",
+    "em estoque",
+)
+
+MARCADORES_BLOQUEIO_LOJA = (
+    "robot check",
+    "digite os caracteres",
+    "nao sou um robo",
+    "acesso negado",
+)
+
 
 class DesafioVercel(RuntimeError):
     pass
@@ -208,6 +233,75 @@ def aguardar_informacao_do_vendedor(driver):
         pass
 
 
+def analisar_disponibilidade(texto_body):
+    """Retorna False quando indisponível, True quando disponível e None se incerto."""
+    texto = chave_texto(texto_body)
+    if any(marcador in texto for marcador in MARCADORES_INDISPONIVEL):
+        return False
+    if any(marcador in texto for marcador in MARCADORES_DISPONIVEL):
+        return True
+    return None
+
+
+def pagina_da_loja_bloqueada(texto_body):
+    texto = chave_texto(texto_body)
+    return any(marcador in texto for marcador in MARCADORES_BLOQUEIO_LOJA)
+
+
+def aguardar_disponibilidade(driver, segundos=10):
+    def estado_apareceu(navegador):
+        try:
+            texto = navegador.find_element(By.TAG_NAME, "body").text
+        except WebDriverException:
+            return False
+        return analisar_disponibilidade(texto) is not None or pagina_da_loja_bloqueada(texto)
+
+    try:
+        WebDriverWait(driver, segundos).until(estado_apareceu)
+    except TimeoutException:
+        pass
+
+
+def verificar_disponibilidade_loja(driver, oferta):
+    """Valida disponibilidade diretamente na Pichau/Terabyte."""
+    loja = oferta["loja"]
+    url = oferta["href"]
+
+    for tentativa in range(1, 3):
+        try:
+            driver.get(url)
+        except TimeoutException:
+            pass
+        except WebDriverException as erro:
+            if tentativa == 2:
+                return "INCONCLUSIVO", url, f"Falha ao abrir a {loja}: {erro.__class__.__name__}"
+            continue
+
+        aguardar_disponibilidade(driver)
+        try:
+            texto_body = driver.find_element(By.TAG_NAME, "body").text
+            url_final = driver.current_url or url
+        except WebDriverException:
+            texto_body = ""
+            url_final = url
+
+        if pagina_da_loja_bloqueada(texto_body):
+            if tentativa == 2:
+                return "INCONCLUSIVO", url_final, f"A {loja} bloqueou o acesso ou exibiu CAPTCHA"
+            continue
+
+        disponibilidade = analisar_disponibilidade(texto_body)
+        if disponibilidade is False:
+            return "INDISPONIVEL", url_final, "Produto indisponível na página da loja"
+        if disponibilidade is True:
+            return "DISPONIVEL", url_final, "Produto disponível na página da loja"
+
+        if tentativa == 2:
+            return "INCONCLUSIVO", url_final, f"A {loja} não exibiu a disponibilidade do produto"
+
+    return "INCONCLUSIVO", url, f"Não foi possível validar a disponibilidade na {loja}"
+
+
 def verificar_vendedor_amazon(driver, texto_body):
     seletores_buybox = (
         "#tabular-buybox",
@@ -257,7 +351,7 @@ def verificar_vendedor_oficial(driver, oferta):
             pass
         except WebDriverException as erro:
             if tentativa == 2:
-                return False, url, f"Falha ao abrir a {loja}: {erro.__class__.__name__}"
+                return False, url, f"Falha ao abrir a {loja}: {erro.__class__.__name__}", "INCONCLUSIVO"
             continue
 
         aguardar_informacao_do_vendedor(driver)
@@ -268,20 +362,13 @@ def verificar_vendedor_oficial(driver, oferta):
             texto_body = ""
             url_final = url
 
-        texto_chave = chave_texto(texto_body)
-        bloqueado = any(
-            termo in texto_chave
-            for termo in (
-                "robot check",
-                "digite os caracteres",
-                "nao sou um robo",
-                "acesso negado",
-            )
-        )
-        if bloqueado:
+        if pagina_da_loja_bloqueada(texto_body):
             if tentativa == 2:
-                return False, url_final, f"A {loja} bloqueou o acesso ou exibiu CAPTCHA"
+                return False, url_final, f"A {loja} bloqueou o acesso ou exibiu CAPTCHA", "INCONCLUSIVO"
             continue
+
+        if analisar_disponibilidade(texto_body) is False:
+            return False, url_final, "Produto indisponível na página da loja", "INDISPONIVEL"
 
         if loja == "Amazon":
             oficial, motivo = verificar_vendedor_amazon(driver, texto_body)
@@ -289,12 +376,13 @@ def verificar_vendedor_oficial(driver, oferta):
             oficial, motivo = verificar_vendedor_kabum(texto_body)
 
         if oficial is not None:
-            return oficial, url_final, motivo
+            status = "DISPONIVEL" if oficial else "MARKETPLACE"
+            return oficial, url_final, motivo, status
 
         if tentativa == 2:
-            return False, url_final, motivo
+            return False, url_final, motivo, "INCONCLUSIVO"
 
-    return False, url, f"Não foi possível validar o vendedor na {loja}"
+    return False, url, f"Não foi possível validar o vendedor na {loja}", "INCONCLUSIVO"
 
 
 def converter_preco(valor):
@@ -430,6 +518,34 @@ def extrair_ofertas_promotech(sessao, url_promotech, navegador=None):
     return ofertas
 
 
+def postar_webhook(sessao, pacote):
+    for tentativa in range(1, 4):
+        try:
+            resposta = sessao.post(
+                GOOGLE_WEBHOOK_URL,
+                json=pacote,
+                timeout=TIMEOUT_WEBHOOK_SEGUNDOS,
+            )
+            resposta.raise_for_status()
+
+            try:
+                retorno = resposta.json()
+            except ValueError as erro:
+                raise requests.RequestException(
+                    "O Apps Script retornou uma resposta que não é JSON"
+                ) from erro
+
+            if retorno.get("erro"):
+                raise requests.RequestException(
+                    f"Apps Script recusou o registro: {retorno['erro']}"
+                )
+            return
+        except requests.RequestException:
+            if tentativa == 3:
+                raise
+            time.sleep(2)
+
+
 def enviar_oferta(sessao, item, oferta):
     preco_vista = oferta["preco_vista"]
     preco_parcelado = oferta["preco_parcelado"]
@@ -444,22 +560,27 @@ def enviar_oferta(sessao, item, oferta):
         "precoMax": item["precoMax"],
         "link": oferta["href"],
         "situacao": situacao,
+        "status": "DISPONIVEL",
         "fonte": "Promotech",
     }
 
-    for tentativa in range(3):
-        try:
-            resposta = sessao.post(
-                GOOGLE_WEBHOOK_URL,
-                json=pacote,
-                timeout=TIMEOUT_WEBHOOK_SEGUNDOS,
-            )
-            resposta.raise_for_status()
-            return # Se deu certo, sai da função
-        except requests.RequestException as erro:
-            if tentativa == 2:
-                raise
-            time.sleep(2)
+    postar_webhook(sessao, pacote)
+
+
+def enviar_indisponibilidade(sessao, item, oferta):
+    pacote = {
+        "nome": item["nome"],
+        "categoria": item["categoria"],
+        "loja": oferta["loja"],
+        "precoVista": 0,
+        "precoParcelado": 0,
+        "precoMax": item["precoMax"],
+        "link": oferta["href"],
+        "situacao": "INDISPONIVEL",
+        "status": "INDISPONIVEL",
+        "fonte": "Loja oficial",
+    }
+    postar_webhook(sessao, pacote)
 
 
 def rotina_principal():
@@ -482,6 +603,7 @@ def rotina_principal():
     ofertas_salvas = 0
     falhas = 0
     falhas_planilha = 0
+    indisponiveis_registrados = 0
     validacoes_inconclusivas = 0
     marketplaces_ignorados = 0
 
@@ -557,17 +679,69 @@ def rotina_principal():
                         print(f"    Falha ao iniciar o navegador: {erro}")
                         continue
 
-                oficial, url_final, motivo = verificar_vendedor_oficial(navegador, oferta)
+                oficial, url_final, motivo, status_loja = verificar_vendedor_oficial(
+                    navegador, oferta
+                )
+                oferta["href"] = limpar_fragmento_url(url_final)
+
+                if status_loja == "INDISPONIVEL":
+                    print("    Produto indisponível na loja; atualizando a planilha.")
+                    try:
+                        enviar_indisponibilidade(sessao, item, oferta)
+                        indisponiveis_registrados += 1
+                    except requests.RequestException as erro:
+                        falhas_planilha += 1
+                        print(
+                            "    Falha ao registrar indisponibilidade na planilha "
+                            f"após 3 tentativas: {erro}"
+                        )
+                    continue
+
                 if not oficial:
-                    if motivo.startswith("Marketplace:"):
+                    if status_loja == "MARKETPLACE":
                         marketplaces_ignorados += 1
                     else:
                         validacoes_inconclusivas += 1
                     print(f"    Ignorada: {motivo}")
                     continue
 
-                oferta["href"] = limpar_fragmento_url(url_final)
                 print(f"    Vendedor confirmado: {motivo}")
+
+            else:
+                if navegador is None:
+                    print(f"    Iniciando navegador para validar a {oferta['loja']}...")
+                    try:
+                        navegador = iniciar_navegador()
+                    except WebDriverException as erro:
+                        navegador_indisponivel = True
+                        falhas += 1
+                        print(f"    Falha ao iniciar o navegador: {erro}")
+                        continue
+
+                status_loja, url_final, motivo = verificar_disponibilidade_loja(
+                    navegador, oferta
+                )
+                oferta["href"] = limpar_fragmento_url(url_final)
+
+                if status_loja == "INDISPONIVEL":
+                    print("    Produto indisponível na loja; atualizando a planilha.")
+                    try:
+                        enviar_indisponibilidade(sessao, item, oferta)
+                        indisponiveis_registrados += 1
+                    except requests.RequestException as erro:
+                        falhas_planilha += 1
+                        print(
+                            "    Falha ao registrar indisponibilidade na planilha "
+                            f"após 3 tentativas: {erro}"
+                        )
+                    continue
+
+                if status_loja == "INCONCLUSIVO":
+                    validacoes_inconclusivas += 1
+                    print(f"    Ignorada: {motivo}")
+                    continue
+
+                print(f"    Disponibilidade confirmada na {oferta['loja']}.")
 
             try:
                 enviar_oferta(sessao, item, oferta)
@@ -586,7 +760,8 @@ def rotina_principal():
     print(
         f"\nConcluído em {duracao:.1f}s: {produtos_com_oferta} produtos, "
         f"{ofertas_salvas} ofertas salvas, {marketplaces_ignorados} marketplaces "
-        f"ignorados, {validacoes_inconclusivas} validações inconclusivas, "
+        f"ignorados, {indisponiveis_registrados} indisponibilidades registradas, "
+        f"{validacoes_inconclusivas} validações inconclusivas, "
         f"{falhas_planilha} falhas de planilha e {falhas} falhas reais de raspagem."
     )
 
