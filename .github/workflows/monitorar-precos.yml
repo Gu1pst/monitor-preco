@@ -10,8 +10,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: monitorar-precos
-  cancel-in-progress: true
+  # Mantém somente uma varredura em execução, mas nunca interrompe a atual.
+  # Se outra for disparada, ela aguarda; novos disparos substituem apenas a pendente.
+  group: monitorar-precos-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   monitorar:
