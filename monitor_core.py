@@ -600,6 +600,17 @@ def postar_webhook(sessao, pacote):
             time.sleep(2)
 
 
+def tipo_do_produto(item):
+    url = item.get("urlPromotech", "")
+    if "/processador/" in url:
+        return "Processador"
+    if "/memoria-ram/" in url:
+        return "Memória RAM"
+    if "/placa-de-video/" in url:
+        return "Placa de vídeo"
+    return item.get("categoria", "Outros")
+
+
 def enviar_oferta(sessao, item, oferta):
     preco_vista = oferta["preco_vista"]
     preco_parcelado = oferta["preco_parcelado"]
@@ -608,6 +619,7 @@ def enviar_oferta(sessao, item, oferta):
     pacote = {
         "nome": item["nome"],
         "categoria": item["categoria"],
+        "tipo": tipo_do_produto(item),
         "loja": oferta["loja"],
         "precoVista": preco_vista,
         "precoParcelado": preco_parcelado,
@@ -625,6 +637,7 @@ def enviar_indisponibilidade(sessao, item, oferta):
     pacote = {
         "nome": item["nome"],
         "categoria": item["categoria"],
+        "tipo": tipo_do_produto(item),
         "loja": oferta["loja"],
         "precoVista": 0,
         "precoParcelado": 0,
@@ -641,6 +654,7 @@ def enviar_remocao_de_oferta(sessao, item, oferta, motivo):
     pacote = {
         "nome": item["nome"],
         "categoria": item["categoria"],
+        "tipo": tipo_do_produto(item),
         "loja": oferta["loja"],
         "precoMax": item["precoMax"],
         "link": oferta.get("href", ""),
@@ -656,6 +670,7 @@ def enviar_sincronizacao_do_produto(sessao, item, lojas_encontradas):
     pacote = {
         "nome": item["nome"],
         "categoria": item["categoria"],
+        "tipo": tipo_do_produto(item),
         "precoMax": item["precoMax"],
         "status": "SINCRONIZAR",
         "lojasEncontradas": sorted(lojas_encontradas),
