@@ -32,6 +32,13 @@ LOJAS_VALIDAS = {
     "terabyte": "Terabyte",
 }
 
+DOMINIOS_DAS_LOJAS = {
+    "Amazon": ("amazon.com.br",),
+    "KaBuM": ("kabum.com.br",),
+    "Pichau": ("pichau.com.br",),
+    "Terabyte": ("terabyteshop.com.br",),
+}
+
 PRODUTOS = [
     {"categoria": "Ryzen 7 5700X", "precoMax": 900.00, "nome": "AMD Ryzen 7 5700X", "urlPromotech": "https://promotech.app.br/produtos/processador/modelo/stvux7zj"},
     {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "ADATA XPG Gammix D35 16GB Branco", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/bxfnyqmq"},
@@ -78,6 +85,8 @@ MARCADORES_DISPONIVEL = (
     "adicionar ao carrinho",
     "comprar agora",
     "em estoque",
+    "pronta entrega",
+    "restam ",
 )
 
 MARCADORES_BLOQUEIO_LOJA = (
@@ -85,6 +94,15 @@ MARCADORES_BLOQUEIO_LOJA = (
     "digite os caracteres",
     "nao sou um robo",
     "acesso negado",
+)
+
+INICIO_DE_RECOMENDACOES = (
+    "ops! ja que esgotou",
+    "oportunidade - compre junto",
+    "produtos relacionados",
+    "quem viu este produto",
+    "veja tambem",
+    "caracteristicas gerais",
 )
 
 
@@ -233,9 +251,29 @@ def aguardar_informacao_do_vendedor(driver):
         pass
 
 
+def dominio_compativel_com_loja(loja, url):
+    hostname = (urlsplit(url).hostname or "").lower().rstrip(".")
+    return any(
+        hostname == dominio or hostname.endswith(f".{dominio}")
+        for dominio in DOMINIOS_DAS_LOJAS.get(loja, ())
+    )
+
+
+def recortar_area_principal_do_produto(texto_body):
+    texto = chave_texto(texto_body)
+    limites = [
+        texto.find(marcador)
+        for marcador in INICIO_DE_RECOMENDACOES
+        if texto.find(marcador) >= 0
+    ]
+    if limites:
+        texto = texto[:min(limites)]
+    return texto[:12000]
+
+
 def analisar_disponibilidade(texto_body):
     """Retorna False quando indisponível, True quando disponível e None se incerto."""
-    texto = chave_texto(texto_body)
+    texto = recortar_area_principal_do_produto(texto_body)
     if any(marcador in texto for marcador in MARCADORES_INDISPONIVEL):
         return False
     if any(marcador in texto for marcador in MARCADORES_DISPONIVEL):
@@ -248,18 +286,17 @@ def pagina_da_loja_bloqueada(texto_body):
     return any(marcador in texto for marcador in MARCADORES_BLOQUEIO_LOJA)
 
 
-def aguardar_disponibilidade(driver, segundos=10):
-    def estado_apareceu(navegador):
-        try:
-            texto = navegador.find_element(By.TAG_NAME, "body").text
-        except WebDriverException:
-            return False
-        return analisar_disponibilidade(texto) is not None or pagina_da_loja_bloqueada(texto)
-
+def aguardar_conteudo_da_loja(driver, segundos=12):
     try:
-        WebDriverWait(driver, segundos).until(estado_apareceu)
+        WebDriverWait(driver, segundos).until(
+            lambda navegador: navegador.execute_script("return document.readyState")
+            == "complete"
+        )
     except TimeoutException:
         pass
+
+    # Algumas lojas inserem o estoque depois do evento de carregamento.
+    time.sleep(2)
 
 
 def verificar_disponibilidade_loja(driver, oferta):
@@ -277,13 +314,20 @@ def verificar_disponibilidade_loja(driver, oferta):
                 return "INCONCLUSIVO", url, f"Falha ao abrir a {loja}: {erro.__class__.__name__}"
             continue
 
-        aguardar_disponibilidade(driver)
+        aguardar_conteudo_da_loja(driver)
         try:
             texto_body = driver.find_element(By.TAG_NAME, "body").text
             url_final = driver.current_url or url
         except WebDriverException:
             texto_body = ""
             url_final = url
+
+        if not dominio_compativel_com_loja(loja, url_final):
+            return (
+                "LOJA_DIVERGENTE",
+                url_final,
+                f"O link da {loja} redirecionou para {urlsplit(url_final).hostname or 'outro site'}",
+            )
 
         if pagina_da_loja_bloqueada(texto_body):
             if tentativa == 2:
@@ -355,12 +399,22 @@ def verificar_vendedor_oficial(driver, oferta):
             continue
 
         aguardar_informacao_do_vendedor(driver)
+        aguardar_conteudo_da_loja(driver, segundos=5)
         try:
             texto_body = driver.find_element(By.TAG_NAME, "body").text
             url_final = driver.current_url or url
         except WebDriverException:
             texto_body = ""
             url_final = url
+
+        if not dominio_compativel_com_loja(loja, url_final):
+            dominio_final = urlsplit(url_final).hostname or "outro site"
+            return (
+                False,
+                url_final,
+                f"Marketplace: o link da {loja} redirecionou para {dominio_final}",
+                "MARKETPLACE",
+            )
 
         if pagina_da_loja_bloqueada(texto_body):
             if tentativa == 2:
@@ -583,6 +637,33 @@ def enviar_indisponibilidade(sessao, item, oferta):
     postar_webhook(sessao, pacote)
 
 
+def enviar_remocao_de_oferta(sessao, item, oferta, motivo):
+    pacote = {
+        "nome": item["nome"],
+        "categoria": item["categoria"],
+        "loja": oferta["loja"],
+        "precoMax": item["precoMax"],
+        "link": oferta.get("href", ""),
+        "situacao": "IGNORADA",
+        "status": "REMOVER",
+        "motivo": motivo,
+        "fonte": "Validação da loja",
+    }
+    postar_webhook(sessao, pacote)
+
+
+def enviar_sincronizacao_do_produto(sessao, item, lojas_encontradas):
+    pacote = {
+        "nome": item["nome"],
+        "categoria": item["categoria"],
+        "precoMax": item["precoMax"],
+        "status": "SINCRONIZAR",
+        "lojasEncontradas": sorted(lojas_encontradas),
+        "fonte": "Promotech",
+    }
+    postar_webhook(sessao, pacote)
+
+
 def rotina_principal():
     if not GOOGLE_WEBHOOK_URL:
         raise RuntimeError(
@@ -652,6 +733,14 @@ def rotina_principal():
             print(f"  Falha ao processar o Promotech: {erro}")
             continue
 
+        try:
+            enviar_sincronizacao_do_produto(
+                sessao, item, {oferta["loja"] for oferta in ofertas}
+            )
+        except requests.RequestException as erro:
+            falhas_planilha += 1
+            print(f"  Falha ao sincronizar lojas na planilha: {erro}")
+
         if not ofertas:
             print("  Nenhuma oferta das lojas configuradas foi encontrada.")
             continue
@@ -700,6 +789,14 @@ def rotina_principal():
                 if not oficial:
                     if status_loja == "MARKETPLACE":
                         marketplaces_ignorados += 1
+                        try:
+                            enviar_remocao_de_oferta(sessao, item, oferta, motivo)
+                        except requests.RequestException as erro:
+                            falhas_planilha += 1
+                            print(
+                                "    Falha ao remover marketplace da planilha "
+                                f"após 3 tentativas: {erro}"
+                            )
                     else:
                         validacoes_inconclusivas += 1
                     print(f"    Ignorada: {motivo}")
@@ -732,6 +829,19 @@ def rotina_principal():
                         falhas_planilha += 1
                         print(
                             "    Falha ao registrar indisponibilidade na planilha "
+                            f"após 3 tentativas: {erro}"
+                        )
+                    continue
+
+                if status_loja == "LOJA_DIVERGENTE":
+                    marketplaces_ignorados += 1
+                    print(f"    Ignorada: {motivo}")
+                    try:
+                        enviar_remocao_de_oferta(sessao, item, oferta, motivo)
+                    except requests.RequestException as erro:
+                        falhas_planilha += 1
+                        print(
+                            "    Falha ao remover oferta divergente da planilha "
                             f"após 3 tentativas: {erro}"
                         )
                     continue
