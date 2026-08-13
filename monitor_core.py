@@ -344,6 +344,15 @@ def verificar_disponibilidade_loja(driver, oferta):
         if disponibilidade is True:
             return "DISPONIVEL", url_final, "Produto disponível na página da loja"
 
+        # Algumas páginas da Pichau não expõem o texto do botão de compra ao
+        # Selenium, mas exibem normalmente uma condição válida de cartão.
+        if extrair_preco_parcelado_da_loja(driver, oferta) is not None:
+            return (
+                "DISPONIVEL",
+                url_final,
+                "Oferta ativa confirmada pela condição de parcelamento",
+            )
+
         if tentativa == 2:
             return "INCONCLUSIVO", url_final, f"A {loja} não exibiu a disponibilidade do produto"
 
@@ -742,7 +751,9 @@ def tipo_do_produto(item):
 
 def enviar_oferta(sessao, item, oferta):
     preco_vista = oferta["preco_vista"]
-    preco_parcelado = oferta["preco_parcelado"]
+    preco_parcelado_total = oferta["preco_parcelado"]
+    quantidade_parcelas = int(oferta["quantidade_parcelas"])
+    valor_parcela = oferta["valor_parcela"]
     situacao = "ABAIXO DO ALVO" if preco_vista <= item["precoMax"] else "ACIMA DO ALVO"
 
     pacote = {
@@ -751,7 +762,12 @@ def enviar_oferta(sessao, item, oferta):
         "tipo": tipo_do_produto(item),
         "loja": oferta["loja"],
         "precoVista": preco_vista,
-        "precoParcelado": preco_parcelado,
+        # Mantém o valor de UMA parcela neste campo por compatibilidade com
+        # versões anteriores do Apps Script.
+        "precoParcelado": valor_parcela,
+        "quantidadeParcelas": quantidade_parcelas,
+        "valorParcela": valor_parcela,
+        "precoParceladoTotal": preco_parcelado_total,
         "precoMax": item["precoMax"],
         "link": oferta["href"],
         "situacao": situacao,
@@ -893,7 +909,8 @@ def rotina_principal():
         for oferta in ofertas:
             print(
                 f"  {oferta['loja']}: à vista R$ {oferta['preco_vista']:.2f} | "
-                f"parcelado R$ {oferta['preco_parcelado']:.2f}"
+                f"total parcelado informado pelo Promotech "
+                f"R$ {oferta['preco_parcelado']:.2f}"
             )
 
             if oferta["loja"] in LOJAS_COM_VALIDACAO_DE_VENDEDOR:
@@ -943,6 +960,14 @@ def rotina_principal():
                             )
                     else:
                         validacoes_inconclusivas += 1
+                        try:
+                            enviar_remocao_de_oferta(sessao, item, oferta, motivo)
+                        except requests.RequestException as erro:
+                            falhas_planilha += 1
+                            print(
+                                "    Falha ao limpar validação inconclusiva da "
+                                f"planilha após 3 tentativas: {erro}"
+                            )
                     print(f"    Ignorada: {motivo}")
                     continue
 
@@ -993,6 +1018,14 @@ def rotina_principal():
                 if status_loja == "INCONCLUSIVO":
                     validacoes_inconclusivas += 1
                     print(f"    Ignorada: {motivo}")
+                    try:
+                        enviar_remocao_de_oferta(sessao, item, oferta, motivo)
+                    except requests.RequestException as erro:
+                        falhas_planilha += 1
+                        print(
+                            "    Falha ao limpar validação inconclusiva da "
+                            f"planilha após 3 tentativas: {erro}"
+                        )
                     continue
 
                 print(f"    Disponibilidade confirmada na {oferta['loja']}.")
@@ -1006,12 +1039,27 @@ def rotina_principal():
                     "    Ignorada: a loja não exibiu uma condição de "
                     "parcelamento sem juros que pudesse ser confirmada."
                 )
+                try:
+                    enviar_remocao_de_oferta(
+                        sessao,
+                        item,
+                        oferta,
+                        "Parcelamento não confirmado diretamente na loja",
+                    )
+                except requests.RequestException as erro:
+                    falhas_planilha += 1
+                    print(
+                        "    Falha ao limpar parcelamento não confirmado da "
+                        f"planilha após 3 tentativas: {erro}"
+                    )
                 continue
 
             total_parcelado, quantidade_parcelas, valor_parcela = (
                 confirmacao_parcelado
             )
             oferta["preco_parcelado"] = total_parcelado
+            oferta["quantidade_parcelas"] = quantidade_parcelas
+            oferta["valor_parcela"] = valor_parcela
             print(
                 f"    Cartão confirmado na loja: {quantidade_parcelas}x de "
                 f"R$ {valor_parcela:.2f} | total R$ {total_parcelado:.2f}"
