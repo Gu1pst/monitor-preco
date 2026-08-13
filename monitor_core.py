@@ -326,6 +326,16 @@ def verificar_disponibilidade_loja(driver, oferta):
             texto_body = ""
             url_final = url
 
+        texto_validacao = texto_body
+        try:
+            html_loja = driver.page_source
+        except (WebDriverException, AttributeError):
+            html_loja = ""
+        if html_loja:
+            texto_validacao += " " + BeautifulSoup(
+                html_loja, "html.parser"
+            ).get_text(" ", strip=True)
+
         if not dominio_compativel_com_loja(loja, url_final):
             return (
                 "LOJA_DIVERGENTE",
@@ -333,12 +343,12 @@ def verificar_disponibilidade_loja(driver, oferta):
                 f"O link da {loja} redirecionou para {urlsplit(url_final).hostname or 'outro site'}",
             )
 
-        if pagina_da_loja_bloqueada(texto_body):
+        if pagina_da_loja_bloqueada(texto_validacao):
             if tentativa == 2:
                 return "INCONCLUSIVO", url_final, f"A {loja} bloqueou o acesso ou exibiu CAPTCHA"
             continue
 
-        disponibilidade = analisar_disponibilidade(texto_body)
+        disponibilidade = analisar_disponibilidade(texto_validacao)
         if disponibilidade is False:
             return "INDISPONIVEL", url_final, "Produto indisponível na página da loja"
         if disponibilidade is True:
@@ -519,6 +529,17 @@ def texto_da_area_de_preco(driver, loja):
 
     # O corpo recortado é um fallback importante para classes que mudam de nome.
     partes.append(recortar_area_principal_do_produto(texto_body))
+
+    # A Pichau às vezes deixa preço/parcelamento no HTML, mas o Selenium não os
+    # inclui em element.text por causa do modo responsivo/hidratação da página.
+    try:
+        html = driver.page_source
+    except (WebDriverException, AttributeError):
+        html = ""
+    if html:
+        texto_html = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+        partes.append(recortar_area_principal_do_produto(texto_html))
+
     return chave_texto(" ".join(partes))
 
 
@@ -532,9 +553,10 @@ def extrair_preco_parcelado_da_loja(driver, oferta):
     # O total explícito tem prioridade porque o valor visual de cada parcela pode
     # ter arredondamento de centavos (12 x 117,55, por exemplo).
     padrao_total = re.compile(
-        r"R\$\s*([\d.,]+)\s+(?:em\s+)?ate\s+(\d{1,2})\s*x\s+de\s+"
+        r"R\$\s*([\d.,]+)(?:(?!R\$).){0,60}?"
+        r"(?:(?:em\s+)?ate\s+)?(\d{1,2})\s*x\s*(?:de\s*)?"
         r"R\$\s*([\d.,]+)(?=[^\d]|$)",
-        re.IGNORECASE,
+        re.DOTALL | re.IGNORECASE,
     )
     candidatos_explicitos = []
     for correspondencia in padrao_total.finditer(texto):
@@ -577,6 +599,24 @@ def extrair_preco_parcelado_da_loja(driver, oferta):
     if candidatos_calculados:
         parcelas, total, valor_parcela = max(candidatos_calculados, key=lambda item: item[0])
         return float(total), parcelas, float(valor_parcela)
+
+    # Último recurso exclusivo da Pichau. Os cards monitorados informam o total
+    # para 12x; calculamos apenas o valor unitário que será mostrado na planilha.
+    # Esta regra só roda depois de confirmar o domínio e a ausência de marcador
+    # de indisponibilidade na página oficial.
+    if loja == "Pichau":
+        try:
+            total = Decimal(str(oferta["preco_parcelado"])).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+        except (KeyError, InvalidOperation, ValueError):
+            return None
+        if preco_vista * Decimal("0.70") <= total <= preco_vista * Decimal("2.50"):
+            parcelas = 12
+            valor_parcela = (total / Decimal(parcelas)).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            return float(total), parcelas, float(valor_parcela)
 
     return None
 
