@@ -5,6 +5,7 @@ import subprocess
 import time
 import unicodedata
 from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from time import perf_counter
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -99,6 +100,9 @@ MARCADORES_BLOQUEIO_LOJA = (
 INICIO_DE_RECOMENDACOES = (
     "ops! ja que esgotou",
     "oportunidade - compre junto",
+    "frequentemente comprados juntos",
+    "clientes que visualizaram este item",
+    "produtos que voce tambem pode gostar",
     "produtos relacionados",
     "quem viu este produto",
     "veja tambem",
@@ -441,6 +445,131 @@ def verificar_vendedor_oficial(driver, oferta):
 
 def converter_preco(valor):
     return float(valor.replace(".", "").replace(",", "."))
+
+
+def converter_preco_da_loja(valor):
+    """Converte tanto 1.234,56 quanto 1,234.56 sem confundir milhar/decimal."""
+    valor = re.sub(r"[^\d.,]", "", valor or "")
+    if not valor:
+        raise ValueError("Preço vazio")
+
+    if "," in valor and "." in valor:
+        separador_decimal = "," if valor.rfind(",") > valor.rfind(".") else "."
+        separador_milhar = "." if separador_decimal == "," else ","
+        valor = valor.replace(separador_milhar, "").replace(separador_decimal, ".")
+    elif "," in valor:
+        partes = valor.split(",")
+        valor = "".join(partes[:-1]) + "." + partes[-1] if len(partes[-1]) == 2 else "".join(partes)
+    elif "." in valor:
+        partes = valor.split(".")
+        valor = "".join(partes[:-1]) + "." + partes[-1] if len(partes[-1]) == 2 else "".join(partes)
+
+    try:
+        return Decimal(valor)
+    except InvalidOperation as erro:
+        raise ValueError(f"Preço inválido: {valor}") from erro
+
+
+def texto_da_area_de_preco(driver, loja):
+    """Lê primeiro o bloco principal do produto, evitando recomendações."""
+    seletores_por_loja = {
+        "Amazon": (
+            "#apex_desktop",
+            "#corePrice_feature_div",
+            "#corePriceDisplay_desktop_feature_div",
+            "#installmentCalculator_feature_div",
+            "#creditCardInstallmentCalculator_feature_div",
+            "#desktop_buybox",
+        ),
+        "KaBuM": (
+            "main",
+            "[data-testid='product-detail']",
+            "[class*='purchase']",
+        ),
+        "Pichau": (
+            "main",
+            "[class*='product-info']",
+            "[class*='product_info']",
+        ),
+        "Terabyte": (
+            "main",
+            "#produto",
+            "[class*='product']",
+        ),
+    }
+    partes = []
+    for seletor in seletores_por_loja.get(loja, ("main",)):
+        texto = texto_do_elemento(driver, seletor)
+        if texto:
+            partes.append(recortar_area_principal_do_produto(texto))
+
+    try:
+        texto_body = driver.find_element(By.TAG_NAME, "body").text
+    except WebDriverException:
+        texto_body = ""
+
+    # O corpo recortado é um fallback importante para classes que mudam de nome.
+    partes.append(recortar_area_principal_do_produto(texto_body))
+    return chave_texto(" ".join(partes))
+
+
+def extrair_preco_parcelado_da_loja(driver, oferta):
+    """Retorna (total, quantidade, valor_da_parcela) confirmado na loja."""
+    loja = oferta["loja"]
+    texto = texto_da_area_de_preco(driver, loja)
+    preco_vista = Decimal(str(oferta["preco_vista"]))
+
+    # Pichau e Terabyte normalmente mostram o total antes da frase das parcelas.
+    # O total explícito tem prioridade porque o valor visual de cada parcela pode
+    # ter arredondamento de centavos (12 x 117,55, por exemplo).
+    padrao_total = re.compile(
+        r"R\$\s*([\d.,]+)\s+(?:em\s+)?ate\s+(\d{1,2})\s*x\s+de\s+"
+        r"R\$\s*([\d.,]+)(?=[^\d]|$)",
+        re.IGNORECASE,
+    )
+    candidatos_explicitos = []
+    for correspondencia in padrao_total.finditer(texto):
+        try:
+            total = converter_preco_da_loja(correspondencia.group(1))
+            parcelas = int(correspondencia.group(2))
+            valor_parcela = converter_preco_da_loja(correspondencia.group(3))
+        except (ValueError, InvalidOperation):
+            continue
+        if parcelas < 2 or not (preco_vista * Decimal("0.70") <= total <= preco_vista * Decimal("2.50")):
+            continue
+        candidatos_explicitos.append((parcelas, total, valor_parcela))
+
+    if candidatos_explicitos:
+        parcelas, total, valor_parcela = max(candidatos_explicitos, key=lambda item: item[0])
+        return float(total), parcelas, float(valor_parcela)
+
+    # KaBuM e Amazon podem mostrar apenas "10x de R$ ... sem juros". Nesse
+    # formato, o total correto é calculado com Decimal para evitar erro binário.
+    padrao_parcela = re.compile(
+        r"(\d{1,2})\s*x\s*(?:de\s*)?R\$\s*([\d.,]+)"
+        r"(?=[^\d]|$)(?:(?!\d{1,2}\s*x).){0,45}?"
+        r"(?:sem\s+juros|s\s*/?\s*juros|no\s+cartao)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    candidatos_calculados = []
+    for correspondencia in padrao_parcela.finditer(texto):
+        try:
+            parcelas = int(correspondencia.group(1))
+            valor_parcela = converter_preco_da_loja(correspondencia.group(2))
+        except (ValueError, InvalidOperation):
+            continue
+        total = (Decimal(parcelas) * valor_parcela).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        if parcelas < 2 or not (preco_vista * Decimal("0.70") <= total <= preco_vista * Decimal("2.50")):
+            continue
+        candidatos_calculados.append((parcelas, total, valor_parcela))
+
+    if candidatos_calculados:
+        parcelas, total, valor_parcela = max(candidatos_calculados, key=lambda item: item[0])
+        return float(total), parcelas, float(valor_parcela)
+
+    return None
 
 
 def limpar_fragmento_url(url):
@@ -867,6 +996,26 @@ def rotina_principal():
                     continue
 
                 print(f"    Disponibilidade confirmada na {oferta['loja']}.")
+
+            confirmacao_parcelado = extrair_preco_parcelado_da_loja(
+                navegador, oferta
+            )
+            if confirmacao_parcelado is None:
+                validacoes_inconclusivas += 1
+                print(
+                    "    Ignorada: a loja não exibiu uma condição de "
+                    "parcelamento sem juros que pudesse ser confirmada."
+                )
+                continue
+
+            total_parcelado, quantidade_parcelas, valor_parcela = (
+                confirmacao_parcelado
+            )
+            oferta["preco_parcelado"] = total_parcelado
+            print(
+                f"    Cartão confirmado na loja: {quantidade_parcelas}x de "
+                f"R$ {valor_parcela:.2f} | total R$ {total_parcelado:.2f}"
+            )
 
             try:
                 enviar_oferta(sessao, item, oferta)
