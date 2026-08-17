@@ -20,6 +20,7 @@ from urllib3.util.retry import Retry
 
 
 GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
+MONITOR_VERSION = "2026-08-17.4"
 TIMEOUT_PAGINA_SEGUNDOS = 15
 TIMEOUT_WEBHOOK_SEGUNDOS = 20
 TIMEOUT_LOJA_SEGUNDOS = 18
@@ -232,6 +233,25 @@ def texto_do_elemento(driver, seletor):
         return ""
 
 
+def textos_dos_elementos(driver, seletor):
+    """Obtém textContent inclusive de elementos visualmente ocultos."""
+    try:
+        elementos = driver.find_elements(By.CSS_SELECTOR, seletor)
+    except (WebDriverException, AttributeError):
+        return []
+
+    textos = []
+    for elemento in elementos:
+        try:
+            texto = elemento.get_attribute("textContent") or elemento.text
+        except WebDriverException:
+            continue
+        texto = normalizar_texto(texto)
+        if texto:
+            textos.append(texto)
+    return textos
+
+
 def aguardar_informacao_do_vendedor(driver):
     def informacao_apareceu(navegador):
         try:
@@ -319,6 +339,7 @@ def verificar_disponibilidade_loja(driver, oferta):
             continue
 
         aguardar_conteudo_da_loja(driver)
+        recarregar_url_limpa_da_loja(driver, loja, url)
         try:
             texto_body = driver.find_element(By.TAG_NAME, "body").text
             url_final = driver.current_url or url
@@ -355,8 +376,19 @@ def verificar_disponibilidade_loja(driver, oferta):
             return "DISPONIVEL", url_final, "Produto disponível na página da loja"
 
         # Algumas páginas da Pichau não expõem o texto do botão de compra ao
-        # Selenium, mas exibem normalmente uma condição válida de cartão.
-        if extrair_preco_parcelado_da_loja(driver, oferta) is not None:
+        # Selenium, mas exibem normalmente preço e condição válida de cartão.
+        preco_temporario = oferta.get("preco_vista")
+        if preco_temporario is None:
+            preco_temporario = extrair_preco_principal_da_loja(driver, loja)
+        oferta_para_teste = dict(oferta)
+        oferta_para_teste["preco_vista"] = preco_temporario
+        if (
+            preco_temporario is not None
+            and extrair_preco_parcelado_da_loja(
+                driver, oferta_para_teste
+            )
+            is not None
+        ):
             return (
                 "DISPONIVEL",
                 url_final,
@@ -372,27 +404,72 @@ def verificar_disponibilidade_loja(driver, oferta):
 def verificar_vendedor_amazon(driver, texto_body):
     seletores_buybox = (
         "#tabular-buybox",
+        "#tabular-buybox-truncate-0",
+        "#tabular-buybox-truncate-1",
         "#merchant-info",
         "#shipsFromSoldByInsideBuyBox_feature_div",
         "#desktop_buybox",
+        "#buybox",
+        "#sellerProfileTriggerId",
+        "#offerDisplayFeatureMerchantInfo_feature_div",
+        "[data-feature-name='offerDisplayFeatureMerchantInfo']",
+        "[data-csa-c-content-id='desktop-merchant-info']",
+        "[data-csa-c-content-id='odf-desktop-merchant-info']",
+        "[data-csa-c-content-id='shipsFromSoldByInsideBuyBox']",
     )
-    texto_buybox = " ".join(texto_do_elemento(driver, seletor) for seletor in seletores_buybox)
-    # Usa o bloco de compra atual para não confundir vendedores de outras ofertas da página.
-    texto = chave_texto(texto_buybox if normalizar_texto(texto_buybox) else texto_body)
+    partes_buybox = []
+    for seletor in seletores_buybox:
+        partes_buybox.extend(textos_dos_elementos(driver, seletor))
 
-    enviado_vendido_juntos = re.search(
-        r"enviado\s*/\s*vendido\s*:?\s*amazon\.com\.br", texto
+    # textContent inclui a tabela de vendedor mesmo quando a Amazon a deixa
+    # visualmente compactada. O body inteiro só é usado como último recurso,
+    # para não confundir a oferta atual com vendedores de recomendações.
+    texto_buybox = normalizar_texto(" ".join(partes_buybox))
+    texto = chave_texto(
+        texto_buybox
+        if texto_buybox
+        else recortar_area_principal_do_produto(texto_body)
     )
+
+    valores_tabela = []
+    for seletor in ("#tabular-buybox-truncate-0", "#tabular-buybox-truncate-1"):
+        valores_tabela.extend(
+            chave_texto(valor) for valor in textos_dos_elementos(driver, seletor)
+        )
+    valores_tabela = [valor for valor in valores_tabela if valor]
+
+    # Em algumas páginas a Amazon apresenta uma única linha:
+    # "Enviado / Vendido  Devolução  Amazon.com.br". Nesse formato existe só
+    # uma ocorrência de Amazon.com.br, embora ela se aplique ao envio e à venda.
+    enviado_vendido_juntos = re.search(
+        r"\benviado\s*/\s*vendido\b.{0,100}?\bamazon\.com\.br\b",
+        texto,
+        re.DOTALL,
+    )
+
     enviado_amazon = re.search(
-        r"enviado(?:\s+de|\s+por)?\s*:?\s*amazon\.com\.br", texto
+        r"\benviado(?:\s+de|\s+por)?\b.{0,50}?\bamazon\.com\.br\b",
+        texto,
+        re.DOTALL,
     )
     vendido_amazon = re.search(
-        r"vendido(?:\s+por)?\s*:?\s*amazon\.com\.br", texto
+        r"\bvendido(?:\s+por)?\b.{0,50}?\bamazon\.com\.br\b",
+        texto,
+        re.DOTALL,
     )
 
-    if enviado_vendido_juntos or (enviado_amazon and vendido_amazon):
+    tabela_separada_amazon = (
+        len(valores_tabela) >= 2
+        and all("amazon.com.br" in valor for valor in valores_tabela[:2])
+    )
+
+    if (
+        enviado_vendido_juntos
+        or tabela_separada_amazon
+        or (enviado_amazon and vendido_amazon)
+    ):
         return True, "Enviado e vendido por Amazon.com.br"
-    if "vendido por" in texto or "enviado de" in texto or "enviado por" in texto:
+    if re.search(r"\benviado\b|\bvendido\b", texto):
         return False, "Marketplace: o envio e/ou a venda não são da Amazon.com.br"
     return None, "A Amazon não exibiu as informações do vendedor"
 
@@ -421,6 +498,11 @@ def verificar_vendedor_oficial(driver, oferta):
                 return False, url, f"Falha ao abrir a {loja}: {erro.__class__.__name__}", "INCONCLUSIVO"
             continue
 
+        # Primeiro deixa o link /out/ do Promotech resolver a loja. Depois
+        # recarrega a página sem parâmetros de afiliado antes de validar o
+        # vendedor e os preços da oferta principal.
+        aguardar_conteudo_da_loja(driver, segundos=5)
+        recarregar_url_limpa_da_loja(driver, loja, url)
         aguardar_informacao_do_vendedor(driver)
         aguardar_conteudo_da_loja(driver, segundos=5)
         try:
@@ -489,13 +571,143 @@ def converter_preco_da_loja(valor):
         raise ValueError(f"Preço inválido: {valor}") from erro
 
 
+def extrair_preco_principal_amazon(driver):
+    """Extrai somente o preço da oferta principal, sem recomendações/listagem."""
+    seletores = (
+        "#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen",
+        "#corePrice_feature_div .priceToPay .a-offscreen",
+        "#apex_desktop .priceToPay .a-offscreen",
+        "#corePriceDisplay_desktop_feature_div [data-a-color='price'] .a-offscreen",
+        "#corePrice_feature_div [data-a-color='price'] .a-offscreen",
+        "#desktop_buybox .a-price .a-offscreen",
+        "#buybox .a-price .a-offscreen",
+        "#price_inside_buybox",
+        "#newBuyBoxPrice",
+        "#priceblock_ourprice",
+        "#priceblock_dealprice",
+    )
+    padrao_preco = re.compile(r"R\$\s*([\d.,]+)", re.IGNORECASE)
+
+    for seletor in seletores:
+        for texto in textos_dos_elementos(driver, seletor):
+            correspondencia = padrao_preco.search(texto)
+            if not correspondencia:
+                continue
+            try:
+                preco = converter_preco_da_loja(correspondencia.group(1))
+            except ValueError:
+                continue
+            if preco > 0:
+                return float(preco)
+    return None
+
+
+def extrair_preco_vista_do_texto(texto):
+    """Extrai o preço à vista apenas quando ele está rotulado como PIX/à vista."""
+    texto = chave_texto(texto)
+    padroes = (
+        r"r\$\s*([\d.,]+)\s*a\s+vista(?:\s+no\s+pix)?",
+        r"a\s+vista(?:(?!r\$).){0,40}?r\$\s*([\d.,]+)",
+        r"r\$\s*([\d.,]+)\s*no\s+pix",
+    )
+    for padrao in padroes:
+        correspondencia = re.search(padrao, texto, re.DOTALL | re.IGNORECASE)
+        if correspondencia:
+            try:
+                preco = converter_preco_da_loja(correspondencia.group(1))
+            except ValueError:
+                continue
+            if preco > 0:
+                return float(preco)
+    return None
+
+
+def extrair_preco_principal_da_loja(driver, loja):
+    """Lê o preço atual na página oficial, sem confiar no card do Promotech."""
+    if loja == "Amazon":
+        return extrair_preco_principal_amazon(driver)
+
+    seletores_por_loja = {
+        "KaBuM": (
+            "[class*='finalPrice']",
+            "[data-testid='price-value']",
+            "[class*='offerPrice']",
+            "[class*='purchase']",
+            "main",
+        ),
+        "Pichau": (
+            "[class*='product-info']",
+            "[class*='product_info']",
+            "main",
+        ),
+        "Terabyte": (
+            "#produto",
+            "[class*='product-info']",
+            "main",
+        ),
+    }
+
+    for seletor in seletores_por_loja.get(loja, ("main",)):
+        for texto in textos_dos_elementos(driver, seletor):
+            preco = extrair_preco_vista_do_texto(
+                recortar_area_principal_do_produto(texto)
+            )
+            if preco is not None:
+                return preco
+
+    try:
+        texto_body = driver.find_element(By.TAG_NAME, "body").text
+    except WebDriverException:
+        texto_body = ""
+    return extrair_preco_vista_do_texto(
+        recortar_area_principal_do_produto(texto_body)
+    )
+
+
+def extrair_parcelamento_do_texto(texto, preco_vista):
+    """Extrai o parcelamento de um bloco já limitado à oferta atual."""
+    texto = chave_texto(texto)
+    preco_vista = Decimal(str(preco_vista))
+
+    padrao_parcela = re.compile(
+        r"(\d{1,2})\s*x\s*(?:de\s*)?R\$\s*([\d.,]+)"
+        r"(?=[^\d]|$)(?:(?!\d{1,2}\s*x).){0,45}?"
+        r"(?:sem\s+juros|s\s*/?\s*juros|no\s+cartao|/\s*mes)",
+        re.DOTALL | re.IGNORECASE,
+    )
+    candidatos_calculados = []
+    for correspondencia in padrao_parcela.finditer(texto):
+        try:
+            parcelas = int(correspondencia.group(1))
+            valor_parcela = converter_preco_da_loja(correspondencia.group(2))
+        except (ValueError, InvalidOperation):
+            continue
+        total = (Decimal(parcelas) * valor_parcela).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        if parcelas < 2 or not (
+            preco_vista * Decimal("0.70")
+            <= total
+            <= preco_vista * Decimal("2.50")
+        ):
+            continue
+        candidatos_calculados.append((parcelas, total, valor_parcela))
+
+    if candidatos_calculados:
+        parcelas, total, valor_parcela = max(
+            candidatos_calculados, key=lambda item: item[0]
+        )
+        return float(total), parcelas, float(valor_parcela)
+    return None
+
+
 def texto_da_area_de_preco(driver, loja):
     """Lê primeiro o bloco principal do produto, evitando recomendações."""
     seletores_por_loja = {
         "Amazon": (
-            "#apex_desktop",
-            "#corePrice_feature_div",
             "#corePriceDisplay_desktop_feature_div",
+            "#corePrice_feature_div",
+            "#installmentCalculatorCentral_feature_div",
             "#installmentCalculator_feature_div",
             "#creditCardInstallmentCalculator_feature_div",
             "#desktop_buybox",
@@ -527,18 +739,21 @@ def texto_da_area_de_preco(driver, loja):
     except WebDriverException:
         texto_body = ""
 
-    # O corpo recortado é um fallback importante para classes que mudam de nome.
-    partes.append(recortar_area_principal_do_produto(texto_body))
+    # Na Amazon não usamos o body inteiro: ele contém seguros, recomendações e
+    # outras ofertas capazes de parecer um parcelamento do produto principal.
+    if loja != "Amazon":
+        partes.append(recortar_area_principal_do_produto(texto_body))
 
     # A Pichau às vezes deixa preço/parcelamento no HTML, mas o Selenium não os
     # inclui em element.text por causa do modo responsivo/hidratação da página.
-    try:
-        html = driver.page_source
-    except (WebDriverException, AttributeError):
-        html = ""
-    if html:
-        texto_html = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
-        partes.append(recortar_area_principal_do_produto(texto_html))
+    if loja == "Pichau":
+        try:
+            html = driver.page_source
+        except (WebDriverException, AttributeError):
+            html = ""
+        if html:
+            texto_html = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+            partes.append(recortar_area_principal_do_produto(texto_html))
 
     return chave_texto(" ".join(partes))
 
@@ -546,59 +761,30 @@ def texto_da_area_de_preco(driver, loja):
 def extrair_preco_parcelado_da_loja(driver, oferta):
     """Retorna (total, quantidade, valor_da_parcela) confirmado na loja."""
     loja = oferta["loja"]
-    texto = texto_da_area_de_preco(driver, loja)
     preco_vista = Decimal(str(oferta["preco_vista"]))
 
-    # Pichau e Terabyte normalmente mostram o total antes da frase das parcelas.
-    # O total explícito tem prioridade porque o valor visual de cada parcela pode
-    # ter arredondamento de centavos (12 x 117,55, por exemplo).
-    padrao_total = re.compile(
-        r"R\$\s*([\d.,]+)(?:(?!R\$).){0,60}?"
-        r"(?:(?:em\s+)?ate\s+)?(\d{1,2})\s*x\s*(?:de\s*)?"
-        r"R\$\s*([\d.,]+)(?=[^\d]|$)",
-        re.DOTALL | re.IGNORECASE,
-    )
-    candidatos_explicitos = []
-    for correspondencia in padrao_total.finditer(texto):
-        try:
-            total = converter_preco_da_loja(correspondencia.group(1))
-            parcelas = int(correspondencia.group(2))
-            valor_parcela = converter_preco_da_loja(correspondencia.group(3))
-        except (ValueError, InvalidOperation):
-            continue
-        if parcelas < 2 or not (preco_vista * Decimal("0.70") <= total <= preco_vista * Decimal("2.50")):
-            continue
-        candidatos_explicitos.append((parcelas, total, valor_parcela))
-
-    if candidatos_explicitos:
-        parcelas, total, valor_parcela = max(candidatos_explicitos, key=lambda item: item[0])
-        return float(total), parcelas, float(valor_parcela)
-
-    # KaBuM e Amazon podem mostrar apenas "10x de R$ ... sem juros". Nesse
-    # formato, o total correto é calculado com Decimal para evitar erro binário.
-    padrao_parcela = re.compile(
-        r"(\d{1,2})\s*x\s*(?:de\s*)?R\$\s*([\d.,]+)"
-        r"(?=[^\d]|$)(?:(?!\d{1,2}\s*x).){0,45}?"
-        r"(?:sem\s+juros|s\s*/?\s*juros|no\s+cartao)",
-        re.DOTALL | re.IGNORECASE,
-    )
-    candidatos_calculados = []
-    for correspondencia in padrao_parcela.finditer(texto):
-        try:
-            parcelas = int(correspondencia.group(1))
-            valor_parcela = converter_preco_da_loja(correspondencia.group(2))
-        except (ValueError, InvalidOperation):
-            continue
-        total = (Decimal(parcelas) * valor_parcela).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
+    if loja == "Amazon":
+        # Cada seletor é analisado isoladamente e em ordem de prioridade. Isso
+        # impede que um 12x de seguro/recomendação vença o 10x da oferta atual.
+        seletores_amazon = (
+            "#corePriceDisplay_desktop_feature_div",
+            "#corePrice_feature_div",
+            "#installmentCalculatorCentral_feature_div",
+            "#installmentCalculator_feature_div",
+            "#creditCardInstallmentCalculator_feature_div",
+            "#desktop_buybox",
         )
-        if parcelas < 2 or not (preco_vista * Decimal("0.70") <= total <= preco_vista * Decimal("2.50")):
-            continue
-        candidatos_calculados.append((parcelas, total, valor_parcela))
+        for seletor in seletores_amazon:
+            for texto in textos_dos_elementos(driver, seletor):
+                resultado = extrair_parcelamento_do_texto(texto, preco_vista)
+                if resultado is not None:
+                    return resultado
+        return None
 
-    if candidatos_calculados:
-        parcelas, total, valor_parcela = max(candidatos_calculados, key=lambda item: item[0])
-        return float(total), parcelas, float(valor_parcela)
+    texto = texto_da_area_de_preco(driver, loja)
+    resultado = extrair_parcelamento_do_texto(texto, preco_vista)
+    if resultado is not None:
+        return resultado
 
     # Último recurso exclusivo da Pichau. Os cards monitorados informam o total
     # para 12x; calculamos apenas o valor unitário que será mostrado na planilha.
@@ -621,9 +807,46 @@ def extrair_preco_parcelado_da_loja(driver, oferta):
     return None
 
 
-def limpar_fragmento_url(url):
+def preparar_url_para_navegacao(url):
+    """Mantém a query de afiliado/redirecionamento e remove só o fragmento."""
     partes = urlsplit(url)
     return urlunsplit((partes.scheme, partes.netloc, partes.path, partes.query, ""))
+
+
+def limpar_url_final_loja(url):
+    """Remove query de afiliado/rastreamento depois de chegar à loja."""
+    partes = urlsplit(url)
+    return urlunsplit((partes.scheme, partes.netloc, partes.path, "", ""))
+
+
+def recarregar_url_limpa_da_loja(driver, loja, url_original):
+    """Após o redirecionamento, abre a página da loja sem query de afiliado."""
+    try:
+        url_atual = driver.current_url or url_original
+    except WebDriverException:
+        return url_original
+
+    # Nunca removemos a query enquanto ainda estamos no /out/ do Promotech,
+    # porque ela pode conter o endereço necessário para o redirecionamento.
+    if not dominio_compativel_com_loja(loja, url_atual):
+        return url_atual
+
+    url_limpa = limpar_url_final_loja(url_atual)
+    if url_limpa == url_atual:
+        return url_limpa
+
+    try:
+        driver.get(url_limpa)
+    except TimeoutException:
+        pass
+    except WebDriverException:
+        return url_atual
+
+    aguardar_conteudo_da_loja(driver, segundos=5)
+    try:
+        return driver.current_url or url_limpa
+    except WebDriverException:
+        return url_limpa
 
 
 def identificar_lojas_pelas_imagens(card):
@@ -733,7 +956,9 @@ def extrair_ofertas_promotech(sessao, url_promotech, navegador=None):
         if not vista or not parcelado:
             continue
 
-        href = limpar_fragmento_url(urljoin(url_promotech, link["href"]))
+        # A query pode ser indispensável para o /out/ do Promotech resolver a
+        # loja. Ela será removida somente depois do redirecionamento terminar.
+        href = preparar_url_para_navegacao(urljoin(url_promotech, link["href"]))
         if loja in lojas_processadas:
             continue
 
@@ -873,6 +1098,7 @@ def rotina_principal():
     inicio = perf_counter()
     agora = datetime.now().astimezone().strftime("%d/%m/%Y %H:%M:%S %z")
     print(f"Iniciando varredura em {agora}")
+    print(f"Versão do monitor: {MONITOR_VERSION}")
 
     sessao = criar_sessao()
     navegador = None
@@ -947,11 +1173,17 @@ def rotina_principal():
 
         produtos_com_oferta += 1
         for oferta in ofertas:
-            print(
-                f"  {oferta['loja']}: à vista R$ {oferta['preco_vista']:.2f} | "
-                f"total parcelado informado pelo Promotech "
-                f"R$ {oferta['preco_parcelado']:.2f}"
-            )
+            if oferta["preco_vista"] is None:
+                print(
+                    f"  {oferta['loja']}: URL oficial cadastrada; "
+                    "consultando preço e estoque diretamente na loja"
+                )
+            else:
+                print(
+                    f"  {oferta['loja']}: à vista R$ {oferta['preco_vista']:.2f} | "
+                    f"total parcelado informado pelo Promotech "
+                    f"R$ {oferta['preco_parcelado']:.2f}"
+                )
 
             if oferta["loja"] in LOJAS_COM_VALIDACAO_DE_VENDEDOR:
                 if navegador_indisponivel:
@@ -972,7 +1204,7 @@ def rotina_principal():
                 oficial, url_final, motivo, status_loja = verificar_vendedor_oficial(
                     navegador, oferta
                 )
-                oferta["href"] = limpar_fragmento_url(url_final)
+                oferta["href"] = limpar_url_final_loja(url_final)
 
                 if status_loja == "INDISPONIVEL":
                     print("    Produto indisponível na loja; atualizando a planilha.")
@@ -1027,7 +1259,7 @@ def rotina_principal():
                 status_loja, url_final, motivo = verificar_disponibilidade_loja(
                     navegador, oferta
                 )
-                oferta["href"] = limpar_fragmento_url(url_final)
+                oferta["href"] = limpar_url_final_loja(url_final)
 
                 if status_loja == "INDISPONIVEL":
                     print("    Produto indisponível na loja; atualizando a planilha.")
@@ -1069,6 +1301,37 @@ def rotina_principal():
                     continue
 
                 print(f"    Disponibilidade confirmada na {oferta['loja']}.")
+
+            preco_loja = extrair_preco_principal_da_loja(
+                navegador, oferta["loja"]
+            )
+            if preco_loja is None:
+                if oferta["loja"] == "Amazon":
+                    validacoes_inconclusivas += 1
+                    print(
+                        "    Ignorada: não foi possível confirmar o preço "
+                        f"principal diretamente na {oferta['loja']}."
+                    )
+                    try:
+                        enviar_remocao_de_oferta(
+                            sessao,
+                            item,
+                            oferta,
+                            "Preço principal não confirmado diretamente na loja",
+                        )
+                    except requests.RequestException as erro:
+                        falhas_planilha += 1
+                        print(
+                            "    Falha ao limpar preço não confirmado da "
+                            f"planilha após 3 tentativas: {erro}"
+                        )
+                    continue
+            else:
+                oferta["preco_vista"] = preco_loja
+                print(
+                    f"    Preço confirmado diretamente na {oferta['loja']}: "
+                    f"R$ {preco_loja:.2f}"
+                )
 
             confirmacao_parcelado = extrair_preco_parcelado_da_loja(
                 navegador, oferta
