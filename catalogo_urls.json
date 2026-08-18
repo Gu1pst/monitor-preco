@@ -1,6 +1,6 @@
 {
   "versao": 1,
-  "atualizadoEm": "2026-08-18T16:20:59+00:00",
+  "atualizadoEm": "2026-08-18T17:42:04+00:00",
   "produtos": {
     "AMD Ryzen 7 5700X": {
       "Amazon": {
@@ -15,7 +15,7 @@
         "score": 86.15,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:35:58+00:00"
+        "descobertoEm": "2026-08-18T16:57:05+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/20937/upgrade1260",
@@ -31,14 +31,14 @@
         "score": 78.73,
         "vendedorOficialNaDescoberta": true,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:36:17+00:00"
+        "descobertoEm": "2026-08-18T16:57:27+00:00"
       },
       "KaBuM": {
         "url": "https://www.kabum.com.br/produto/1044857/memoria-ram-adata-xpg-gammix-d35-ddr4-16gb-3200mhz-branco-ax4u320016g16a-swhd35-",
         "score": 86.67,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:35:58+00:00"
+        "descobertoEm": "2026-08-18T16:57:05+00:00"
       }
     },
     "ADATA XPG Gammix D35 16GB Preto": {
@@ -47,7 +47,7 @@
         "score": 86.92,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:35:58+00:00"
+        "descobertoEm": "2026-08-18T16:57:05+00:00"
       }
     },
     "Corsair Vengeance LPX 16GB Preto": {
@@ -56,7 +56,7 @@
         "score": 86.4,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:35:58+00:00"
+        "descobertoEm": "2026-08-18T16:57:05+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/39089/memoria-ddr4-corsair-vengeance-lpx-16gb-3200mhz-preto-cmk16gx4m1e3200c16",
@@ -72,7 +72,7 @@
         "score": 93.33,
         "vendedorOficialNaDescoberta": true,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:35:58+00:00"
+        "descobertoEm": "2026-08-18T16:57:05+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/19158/memoria-kingston-fury-beast-16gb-3200mhz-ddr4-cl16-preto-kf432c16bb116",
@@ -97,7 +97,7 @@
         "score": 86.36,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": null,
-        "descobertoEm": "2026-08-18T15:36:17+00:00"
+        "descobertoEm": "2026-08-18T16:57:27+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/35985/placa-de-video-gigabyte-amd-radeon-rx-9060-xt-gaming-oc-16gb-gddr6-fsr-ray-tracing-gv-r9060xtgaming-oc-16gd",
@@ -124,7 +124,7 @@
         "score": 84.44,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": null,
-        "descobertoEm": "2026-08-18T15:36:17+00:00"
+        "descobertoEm": "2026-08-18T16:57:27+00:00"
       }
     },
     "XFX RX 9060 XT 16GB Swift Triple Fan OC": {
@@ -151,7 +151,7 @@
         "score": 83.78,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:36:17+00:00"
+        "descobertoEm": "2026-08-18T16:57:27+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/36479/placa-de-video-xfx-mercury-amd-radeon-rx-9060-xt-oc-gaming-edition-16gb-gddr6-fsr-ray-tracing-rx-96tmercb9",
@@ -176,7 +176,7 @@
         "score": 86.09,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:36:17+00:00"
+        "descobertoEm": "2026-08-18T16:57:27+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/36048/placa-de-video-palit-nvidia-geforce-rtx-5060-ti-infinity-3-16gb-gddr7-dlss-ray-tracing-ne7506t019t1-gb2061s",
@@ -192,7 +192,7 @@
         "score": 84.83,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:35:58+00:00"
+        "descobertoEm": "2026-08-18T16:57:05+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/40483/placa-de-video-gainward-nvidia-geforce-rtx-5060-ti-python-iii-16gb-gddr7-dlss-ray-tracing-ne7506t019t1-gb2061t",
@@ -217,7 +217,7 @@
         "score": 84.8,
         "vendedorOficialNaDescoberta": true,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:35:58+00:00"
+        "descobertoEm": "2026-08-18T16:57:05+00:00"
       }
     },
     "ASUS RTX 5060 Ti 16GB TUF OC": {
@@ -244,7 +244,7 @@
         "score": 84.62,
         "vendedorOficialNaDescoberta": true,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:35:58+00:00"
+        "descobertoEm": "2026-08-18T16:57:05+00:00"
       }
     },
     "ASUS RTX 5060 Ti 16GB Prime OC": {
