@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shutil
@@ -6,6 +7,7 @@ import time
 import unicodedata
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from pathlib import Path
 from time import perf_counter
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -20,7 +22,13 @@ from urllib3.util.retry import Retry
 
 
 GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
-MONITOR_VERSION = "2026-08-17.4"
+MONITOR_VERSION = "2026-08-17.5"
+CATALOGO_URLS_CAMINHO = Path(
+    os.environ.get(
+        "CATALOGO_URLS_CAMINHO",
+        str(Path(__file__).with_name("catalogo_urls.json")),
+    )
+)
 TIMEOUT_PAGINA_SEGUNDOS = 15
 TIMEOUT_WEBHOOK_SEGUNDOS = 20
 TIMEOUT_LOJA_SEGUNDOS = 18
@@ -607,7 +615,8 @@ def extrair_preco_vista_do_texto(texto):
     texto = chave_texto(texto)
     padroes = (
         r"r\$\s*([\d.,]+)\s*a\s+vista(?:\s+no\s+pix)?",
-        r"a\s+vista(?:(?!r\$).){0,40}?r\$\s*([\d.,]+)",
+        r"a\s+vista(?:(?!\d{1,2}\s*x|parcel|r\$).){0,40}?"
+        r"r\$\s*([\d.,]+)",
         r"r\$\s*([\d.,]+)\s*no\s+pix",
     )
     for padrao in padroes:
@@ -622,46 +631,128 @@ def extrair_preco_vista_do_texto(texto):
     return None
 
 
+def extrair_todos_precos_vista_do_texto(texto):
+    """Retorna preços explicitamente associados a PIX/à vista."""
+    texto = chave_texto(texto)
+    padroes = (
+        r"r\$\s*([\d.,]+)\s*a\s+vista(?:\s+no\s+pix)?",
+        r"a\s+vista(?:(?!\d{1,2}\s*x|parcel|r\$).){0,40}?"
+        r"r\$\s*([\d.,]+)",
+        r"r\$\s*([\d.,]+)\s*no\s+pix",
+    )
+    precos = []
+    for padrao in padroes:
+        for correspondencia in re.finditer(
+            padrao, texto, re.DOTALL | re.IGNORECASE
+        ):
+            try:
+                preco = converter_preco_da_loja(correspondencia.group(1))
+            except ValueError:
+                continue
+            if preco > 0:
+                precos.append(float(preco))
+    return precos
+
+
+def extrair_preco_estruturado(driver):
+    """Lê preço de metadados/JSON-LD restritos ao produto principal."""
+    try:
+        html = driver.page_source
+    except (WebDriverException, AttributeError):
+        return None
+    if not html:
+        return None
+
+    soup = BeautifulSoup(html, "html.parser")
+    candidatos = []
+    for seletor, atributo in (
+        ("meta[property='product:price:amount']", "content"),
+        ("meta[itemprop='price']", "content"),
+        ("[itemprop='price'][content]", "content"),
+    ):
+        for elemento in soup.select(seletor):
+            try:
+                preco = converter_preco_da_loja(elemento.get(atributo, ""))
+            except ValueError:
+                continue
+            if preco > 0:
+                candidatos.append(float(preco))
+
+    def visitar_json(valor):
+        if isinstance(valor, dict):
+            tipo = valor.get("@type")
+            if tipo == "Offer" or (isinstance(tipo, list) and "Offer" in tipo):
+                preco_bruto = valor.get("price") or valor.get("lowPrice")
+                if preco_bruto is not None:
+                    try:
+                        preco = converter_preco_da_loja(str(preco_bruto))
+                    except ValueError:
+                        pass
+                    else:
+                        if preco > 0:
+                            candidatos.append(float(preco))
+            for filho in valor.values():
+                visitar_json(filho)
+        elif isinstance(valor, list):
+            for filho in valor:
+                visitar_json(filho)
+
+    for script in soup.select("script[type='application/ld+json']"):
+        try:
+            visitar_json(json.loads(script.string or script.get_text() or ""))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+
+    return min(candidatos) if candidatos else None
+
+
+def extrair_primeiro_preco_dos_seletores(driver, seletores):
+    padrao = re.compile(r"R\$\s*([\d.,]+)", re.IGNORECASE)
+    for seletor in seletores:
+        for texto in textos_dos_elementos(driver, seletor):
+            correspondencia = padrao.search(texto)
+            if not correspondencia:
+                continue
+            try:
+                preco = converter_preco_da_loja(correspondencia.group(1))
+            except ValueError:
+                continue
+            if preco > 0:
+                return float(preco)
+    return None
+
+
 def extrair_preco_principal_da_loja(driver, loja):
     """Lê o preço atual na página oficial, sem confiar no card do Promotech."""
     if loja == "Amazon":
         return extrair_preco_principal_amazon(driver)
 
-    seletores_por_loja = {
-        "KaBuM": (
+    if loja == "KaBuM":
+        preco = extrair_primeiro_preco_dos_seletores(
+            driver,
+            (
             "[class*='finalPrice']",
             "[data-testid='price-value']",
             "[class*='offerPrice']",
-            "[class*='purchase']",
-            "main",
-        ),
-        "Pichau": (
-            "[class*='product-info']",
-            "[class*='product_info']",
-            "main",
-        ),
-        "Terabyte": (
-            "#produto",
-            "[class*='product-info']",
-            "main",
-        ),
-    }
-
-    for seletor in seletores_por_loja.get(loja, ("main",)):
-        for texto in textos_dos_elementos(driver, seletor):
-            preco = extrair_preco_vista_do_texto(
-                recortar_area_principal_do_produto(texto)
-            )
-            if preco is not None:
-                return preco
+            ),
+        )
+        if preco is not None:
+            return preco
 
     try:
         texto_body = driver.find_element(By.TAG_NAME, "body").text
     except WebDriverException:
         texto_body = ""
-    return extrair_preco_vista_do_texto(
-        recortar_area_principal_do_produto(texto_body)
-    )
+    texto_principal = recortar_area_principal_do_produto(texto_body)
+    candidatos_texto = extrair_todos_precos_vista_do_texto(texto_principal)
+    preco_estruturado = extrair_preco_estruturado(driver)
+
+    if candidatos_texto:
+        # Na Terabyte há um modal de compartilhamento com o total parcelado
+        # rotulado incorretamente como "à vista". O recorte do body e o menor
+        # valor rotulado preservam o PIX da área principal do produto.
+        return min(candidatos_texto)
+    return preco_estruturado
 
 
 def extrair_parcelamento_do_texto(texto, preco_vista):
@@ -1089,6 +1180,51 @@ def enviar_sincronizacao_do_produto(sessao, item, lojas_encontradas):
     postar_webhook(sessao, pacote)
 
 
+def carregar_catalogo_urls(caminho=CATALOGO_URLS_CAMINHO):
+    if not caminho.exists():
+        raise RuntimeError(
+            f"Catálogo de URLs não encontrado: {caminho}. "
+            "Execute primeiro o workflow Descobrir links das lojas."
+        )
+    try:
+        with caminho.open("r", encoding="utf-8") as arquivo:
+            catalogo = json.load(arquivo)
+    except (OSError, ValueError, json.JSONDecodeError) as erro:
+        raise RuntimeError(f"Não foi possível ler {caminho}: {erro}") from erro
+
+    produtos = catalogo.get("produtos")
+    if not isinstance(produtos, dict):
+        raise RuntimeError("O catálogo de URLs possui formato inválido")
+    if not produtos:
+        raise RuntimeError(
+            "O catálogo de URLs ainda está vazio. Execute primeiro o workflow "
+            "Descobrir links das lojas; a planilha não foi alterada."
+        )
+    return catalogo
+
+
+def obter_url_do_catalogo(catalogo, item, loja):
+    registro = catalogo.get("produtos", {}).get(item["nome"], {}).get(loja)
+    if isinstance(registro, str):
+        return registro.strip()
+    if isinstance(registro, dict):
+        return str(registro.get("url", "")).strip()
+    return ""
+
+
+def criar_oferta_do_catalogo(catalogo, item, loja):
+    url = obter_url_do_catalogo(catalogo, item, loja)
+    if not url or not dominio_compativel_com_loja(loja, url):
+        return None
+    return {
+        "loja": loja,
+        "href": limpar_url_final_loja(url),
+        "preco_vista": None,
+        "preco_parcelado": None,
+        "fonte": "Catálogo automático",
+    }
+
+
 def rotina_principal():
     if not GOOGLE_WEBHOOK_URL:
         raise RuntimeError(
@@ -1099,13 +1235,23 @@ def rotina_principal():
     agora = datetime.now().astimezone().strftime("%d/%m/%Y %H:%M:%S %z")
     print(f"Iniciando varredura em {agora}")
     print(f"Versão do monitor: {MONITOR_VERSION}")
+    catalogo = carregar_catalogo_urls()
+    loja_alvo = os.environ.get("LOJA_ALVO", "").strip()
+    if loja_alvo and loja_alvo not in LOJAS_VALIDAS.values():
+        raise RuntimeError(f"LOJA_ALVO inválida: {loja_alvo}")
+    lojas = (loja_alvo,) if loja_alvo else tuple(LOJAS_VALIDAS.values())
+    print(
+        "Fonte: catálogo automático | "
+        f"loja(s): {', '.join(lojas)} | "
+        f"catálogo atualizado em: {catalogo.get('atualizadoEm', 'data desconhecida')}"
+    )
 
     sessao = criar_sessao()
-    navegador = None
-    navegador_indisponivel = False
-    promotech_via_navegador = os.environ.get(
-        "PROMOTECH_VIA_CHROME", ""
-    ).strip().lower() in {"1", "true", "sim"}
+    try:
+        navegador = iniciar_navegador()
+    except WebDriverException as erro:
+        raise RuntimeError(f"Falha ao iniciar o Chrome: {erro}") from erro
+
     produtos_com_oferta = 0
     ofertas_salvas = 0
     falhas = 0
@@ -1114,93 +1260,34 @@ def rotina_principal():
     validacoes_inconclusivas = 0
     marketplaces_ignorados = 0
 
-    if promotech_via_navegador:
-        print("Promotech configurado para acesso direto pelo Chrome.")
-        try:
-            navegador = iniciar_navegador()
-        except WebDriverException as erro:
-            raise RuntimeError(f"Falha ao iniciar o Chrome: {erro}") from erro
-
     for item in PRODUTOS:
         print(f"\nMapeando: {item['nome']}")
-        try:
-            if promotech_via_navegador:
-                ofertas = extrair_ofertas_promotech(
-                    sessao, item["urlPromotech"], navegador
-                )
-            else:
+        ofertas = []
+        for loja in lojas:
+            oferta = criar_oferta_do_catalogo(catalogo, item, loja)
+            if oferta is None:
+                print(f"  {loja}: link ainda não descoberto; célula será limpa")
                 try:
-                    ofertas = extrair_ofertas_promotech(
-                        sessao, item["urlPromotech"]
+                    enviar_remocao_de_oferta(
+                        sessao,
+                        item,
+                        {"loja": loja, "href": ""},
+                        "Link não encontrado pela descoberta automática",
                     )
-                except DesafioVercel:
-                    print("  Vercel bloqueou a requisição HTTP; alternando para o Chrome...")
-                    if navegador is None:
-                        navegador = iniciar_navegador()
-                    promotech_via_navegador = True
-                    ofertas = extrair_ofertas_promotech(
-                        sessao, item["urlPromotech"], navegador
-                    )
-        except DesafioVercel as erro:
-            falhas += 1
-            print(f"  Bloqueio geral ao consultar o Promotech: {erro}")
-            break
-        except WebDriverException as erro:
-            navegador_indisponivel = True
-            falhas += 1
-            print(f"  Falha no navegador ao consultar o Promotech: {erro}")
-            break
-        except requests.RequestException as erro:
-            falhas += 1
-            print(f"  Falha ao consultar o Promotech: {erro}")
-            continue
-        except RuntimeError as erro:
-            falhas += 1
-            print(f"  Falha ao processar o Promotech: {erro}")
-            continue
-
-        try:
-            enviar_sincronizacao_do_produto(
-                sessao, item, {oferta["loja"] for oferta in ofertas}
-            )
-        except requests.RequestException as erro:
-            falhas_planilha += 1
-            print(f"  Falha ao sincronizar lojas na planilha: {erro}")
+                except requests.RequestException as erro:
+                    falhas_planilha += 1
+                    print(f"    Falha ao limpar a célula: {erro}")
+                continue
+            ofertas.append(oferta)
 
         if not ofertas:
-            print("  Nenhuma oferta das lojas configuradas foi encontrada.")
             continue
 
         produtos_com_oferta += 1
         for oferta in ofertas:
-            if oferta["preco_vista"] is None:
-                print(
-                    f"  {oferta['loja']}: URL oficial cadastrada; "
-                    "consultando preço e estoque diretamente na loja"
-                )
-            else:
-                print(
-                    f"  {oferta['loja']}: à vista R$ {oferta['preco_vista']:.2f} | "
-                    f"total parcelado informado pelo Promotech "
-                    f"R$ {oferta['preco_parcelado']:.2f}"
-                )
+            print(f"  {oferta['loja']}: consultando {oferta['href']}")
 
             if oferta["loja"] in LOJAS_COM_VALIDACAO_DE_VENDEDOR:
-                if navegador_indisponivel:
-                    falhas += 1
-                    print("    Ignorada: navegador indisponível para validar o vendedor")
-                    continue
-
-                if navegador is None:
-                    print("    Iniciando navegador para validar Amazon/KaBuM...")
-                    try:
-                        navegador = iniciar_navegador()
-                    except WebDriverException as erro:
-                        navegador_indisponivel = True
-                        falhas += 1
-                        print(f"    Falha ao iniciar o navegador: {erro}")
-                        continue
-
                 oficial, url_final, motivo, status_loja = verificar_vendedor_oficial(
                     navegador, oferta
                 )
@@ -1231,31 +1318,15 @@ def rotina_principal():
                                 f"após 3 tentativas: {erro}"
                             )
                     else:
+                        # CAPTCHA, timeout ou bloco ausente não provam que a
+                        # oferta deixou de ser válida. Mantém o último preço.
                         validacoes_inconclusivas += 1
-                        try:
-                            enviar_remocao_de_oferta(sessao, item, oferta, motivo)
-                        except requests.RequestException as erro:
-                            falhas_planilha += 1
-                            print(
-                                "    Falha ao limpar validação inconclusiva da "
-                                f"planilha após 3 tentativas: {erro}"
-                            )
-                    print(f"    Ignorada: {motivo}")
+                    print(f"    Não atualizada: {motivo}")
                     continue
 
                 print(f"    Vendedor confirmado: {motivo}")
 
             else:
-                if navegador is None:
-                    print(f"    Iniciando navegador para validar a {oferta['loja']}...")
-                    try:
-                        navegador = iniciar_navegador()
-                    except WebDriverException as erro:
-                        navegador_indisponivel = True
-                        falhas += 1
-                        print(f"    Falha ao iniciar o navegador: {erro}")
-                        continue
-
                 status_loja, url_final, motivo = verificar_disponibilidade_loja(
                     navegador, oferta
                 )
@@ -1289,15 +1360,7 @@ def rotina_principal():
 
                 if status_loja == "INCONCLUSIVO":
                     validacoes_inconclusivas += 1
-                    print(f"    Ignorada: {motivo}")
-                    try:
-                        enviar_remocao_de_oferta(sessao, item, oferta, motivo)
-                    except requests.RequestException as erro:
-                        falhas_planilha += 1
-                        print(
-                            "    Falha ao limpar validação inconclusiva da "
-                            f"planilha após 3 tentativas: {erro}"
-                        )
+                    print(f"    Não atualizada: {motivo}")
                     continue
 
                 print(f"    Disponibilidade confirmada na {oferta['loja']}.")
@@ -1306,32 +1369,15 @@ def rotina_principal():
                 navegador, oferta["loja"]
             )
             if preco_loja is None:
-                if oferta["loja"] == "Amazon":
-                    validacoes_inconclusivas += 1
-                    print(
-                        "    Ignorada: não foi possível confirmar o preço "
-                        f"principal diretamente na {oferta['loja']}."
-                    )
-                    try:
-                        enviar_remocao_de_oferta(
-                            sessao,
-                            item,
-                            oferta,
-                            "Preço principal não confirmado diretamente na loja",
-                        )
-                    except requests.RequestException as erro:
-                        falhas_planilha += 1
-                        print(
-                            "    Falha ao limpar preço não confirmado da "
-                            f"planilha após 3 tentativas: {erro}"
-                        )
-                    continue
-            else:
-                oferta["preco_vista"] = preco_loja
+                validacoes_inconclusivas += 1
                 print(
-                    f"    Preço confirmado diretamente na {oferta['loja']}: "
-                    f"R$ {preco_loja:.2f}"
+                    "    Não atualizada: preço à vista não confirmado "
+                    "diretamente na loja"
                 )
+                continue
+
+            oferta["preco_vista"] = preco_loja
+            print(f"    À vista confirmado: R$ {preco_loja:.2f}")
 
             confirmacao_parcelado = extrair_preco_parcelado_da_loja(
                 navegador, oferta
@@ -1339,22 +1385,9 @@ def rotina_principal():
             if confirmacao_parcelado is None:
                 validacoes_inconclusivas += 1
                 print(
-                    "    Ignorada: a loja não exibiu uma condição de "
-                    "parcelamento sem juros que pudesse ser confirmada."
+                    "    Não atualizada: parcelamento sem juros não confirmado "
+                    "diretamente na loja"
                 )
-                try:
-                    enviar_remocao_de_oferta(
-                        sessao,
-                        item,
-                        oferta,
-                        "Parcelamento não confirmado diretamente na loja",
-                    )
-                except requests.RequestException as erro:
-                    falhas_planilha += 1
-                    print(
-                        "    Falha ao limpar parcelamento não confirmado da "
-                        f"planilha após 3 tentativas: {erro}"
-                    )
                 continue
 
             total_parcelado, quantidade_parcelas, valor_parcela = (
@@ -1375,15 +1408,15 @@ def rotina_principal():
                 falhas_planilha += 1
                 print(f"    Falha ao salvar na planilha após 3 tentativas: {erro}")
 
-    if navegador is not None:
-        try:
-            navegador.quit()
-        except WebDriverException:
-            pass
+    try:
+        navegador.quit()
+    except WebDriverException:
+        pass
 
     duracao = perf_counter() - inicio
     print(
-        f"\nConcluído em {duracao:.1f}s: {produtos_com_oferta} produtos, "
+        f"\nConcluído em {duracao:.1f}s ({', '.join(lojas)}): "
+        f"{produtos_com_oferta} produtos com link, "
         f"{ofertas_salvas} ofertas salvas, {marketplaces_ignorados} marketplaces "
         f"ignorados, {indisponiveis_registrados} indisponibilidades registradas, "
         f"{validacoes_inconclusivas} validações inconclusivas, "
