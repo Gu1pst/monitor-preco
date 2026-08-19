@@ -1,5 +1,6 @@
 import argparse
 import base64
+import html as html_stdlib
 import json
 import os
 import re
@@ -9,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, quote, quote_plus, unquote, urlsplit, urlunsplit
 
+import requests
 from bs4 import BeautifulSoup
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
@@ -35,6 +37,9 @@ DOMINIOS_POR_LOJA = {
     "Pichau": "pichau.com.br",
     "Terabyte": "terabyteshop.com.br",
 }
+
+PICHAU_SITEMAP_URL = "https://www.pichau.com.br/media/sitemap.xml"
+_URLS_SITEMAP_PICHAU = None
 
 
 MARCAS = {
@@ -78,6 +83,11 @@ def termo_de_identidade(item):
     return f"{item['nome']} {item['categoria']}".strip()
 
 
+def identidade_extra_compativel(item, texto_candidato):
+    identidade = tokens(item.get("identidade", ""))
+    return not identidade or identidade.issubset(tokens(texto_candidato))
+
+
 def url_de_busca(loja, termo):
     if loja == "Amazon":
         return f"https://www.amazon.com.br/s?k={quote_plus(termo)}"
@@ -94,7 +104,10 @@ def url_de_busca(loja, termo):
 def url_canonica_produto(loja, url):
     if not dominio_compativel_com_loja(loja, url):
         return None
-    partes = urlsplit(url)
+    try:
+        partes = urlsplit(url)
+    except ValueError:
+        return None
     caminho = partes.path.rstrip("/")
 
     if loja == "Amazon":
@@ -192,7 +205,10 @@ def decodificar_url_bing(valor):
 
 
 def destino_de_link_externo(href):
-    partes = urlsplit(href or "")
+    try:
+        partes = urlsplit(href or "")
+    except ValueError:
+        return None
     host = (partes.hostname or "").lower()
     parametros = parse_qs(partes.query)
     if "bing.com" in host:
@@ -244,7 +260,11 @@ def candidatos_do_html(driver, loja, item, melhores):
     ):
         bruto = correspondencia.group(1) or correspondencia.group(0)
         bruto = bruto.replace("\\/", "/").strip('"')
-        if not urlsplit(bruto).scheme:
+        try:
+            tem_esquema = bool(urlsplit(bruto).scheme)
+        except ValueError:
+            continue
+        if not tem_esquema:
             bruto = (
                 f"https://www.{DOMINIOS_POR_LOJA[loja]}/"
                 f"{bruto.lstrip('/')}"
@@ -252,7 +272,66 @@ def candidatos_do_html(driver, loja, item, melhores):
         adicionar_candidato(melhores, loja, item, bruto, bruto)
 
 
+def carregar_urls_sitemap_pichau():
+    """Baixa uma única vez o catálogo público indicado no robots.txt."""
+    global _URLS_SITEMAP_PICHAU
+    if _URLS_SITEMAP_PICHAU is not None:
+        return _URLS_SITEMAP_PICHAU
+
+    resposta = requests.get(
+        PICHAU_SITEMAP_URL,
+        timeout=60,
+        headers={
+            "User-Agent": "Googlebot/2.1 (+http://www.google.com/bot.html)",
+            "Accept": "application/xml,text/xml;q=0.9,*/*;q=0.8",
+        },
+    )
+    resposta.raise_for_status()
+    _URLS_SITEMAP_PICHAU = [
+        html_stdlib.unescape(url.strip())
+        for url in re.findall(r"<loc>(.*?)</loc>", resposta.text, re.I | re.S)
+        if "pichau.com.br/" in url
+    ]
+    if not _URLS_SITEMAP_PICHAU:
+        raise RuntimeError("O sitemap público da Pichau veio vazio")
+    print(f"    Sitemap da Pichau carregado: {len(_URLS_SITEMAP_PICHAU)} URLs")
+    return _URLS_SITEMAP_PICHAU
+
+
+def candidatos_do_sitemap_pichau(item, melhores):
+    categoria = normalizar(item.get("categoria", ""))
+    if "memoria ram" in categoria:
+        prefixo = "/memoria-"
+    elif "ryzen" in categoria or "processador" in categoria:
+        prefixo = "/processador-"
+    else:
+        prefixo = "/placa-de-video-"
+
+    for url in carregar_urls_sitemap_pichau():
+        try:
+            caminho = urlsplit(url).path.lower()
+        except ValueError:
+            continue
+        # Evita kits, computadores completos e recomendações com o mesmo chip.
+        if not caminho.startswith(prefixo):
+            continue
+        if not identidade_extra_compativel(item, caminho):
+            continue
+        adicionar_candidato(melhores, "Pichau", item, url, url)
+
+
 def coletar_candidatos(driver, loja, item, limite=6):
+    melhores = {}
+    if loja == "Pichau":
+        try:
+            candidatos_do_sitemap_pichau(item, melhores)
+        except (requests.RequestException, RuntimeError) as erro:
+            print(f"    Falha ao consultar o sitemap da Pichau: {erro}")
+        if melhores:
+            return sorted(
+                melhores.items(), key=lambda par: par[1], reverse=True
+            )[:limite]
+
     busca = url_de_busca(loja, termo_de_busca(item))
     print(f"    Busca: {busca}")
     try:
@@ -268,7 +347,6 @@ def coletar_candidatos(driver, loja, item, limite=6):
     except TimeoutException:
         pass
 
-    melhores = {}
     for link in driver.find_elements(By.TAG_NAME, "a"):
         try:
             href = link.get_attribute("href") or ""
@@ -335,6 +413,8 @@ def avaliar_candidato(driver, loja, item, url, score_busca):
         return None
 
     texto_produto = f"{ler_texto_produto(driver)} {urlsplit(canonica).path}"
+    if not identidade_extra_compativel(item, texto_produto):
+        return None
     score_pagina = pontuar_identidade(item, texto_produto)
     if score_pagina < 45:
         return None
