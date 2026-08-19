@@ -22,7 +22,7 @@ from urllib3.util.retry import Retry
 
 
 GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
-MONITOR_VERSION = "2026-08-19.11"
+MONITOR_VERSION = "2026-08-19.12"
 CATALOGO_URLS_CAMINHO = Path(
     os.environ.get(
         "CATALOGO_URLS_CAMINHO",
@@ -92,6 +92,7 @@ MARCADORES_INDISPONIVEL = (
 )
 
 MARCADORES_DISPONIVEL = (
+    "produto disponivel",
     "adicionar ao carrinho",
     "comprar agora",
     "em estoque",
@@ -115,6 +116,7 @@ INICIO_DE_RECOMENDACOES = (
     "produtos relacionados",
     "quem viu este produto",
     "veja tambem",
+    "caracteristicas",
     "caracteristicas gerais",
 )
 
@@ -316,6 +318,47 @@ def analisar_disponibilidade(texto_body):
     return None
 
 
+def analisar_controle_de_compra_pichau(driver):
+    """Lê o botão principal da Pichau mesmo quando ele não aparece no body.text."""
+    try:
+        controles = driver.execute_script(
+            """
+            return Array.from(document.querySelectorAll('button, a, [role="button"]'))
+              .filter((elemento) => {
+                const estilo = window.getComputedStyle(elemento);
+                const caixa = elemento.getBoundingClientRect();
+                return estilo.display !== 'none' && estilo.visibility !== 'hidden' &&
+                       caixa.width > 0 && caixa.height > 0;
+              })
+              .map((elemento) => ({
+                texto: (elemento.innerText || elemento.textContent || '').trim(),
+                desabilitado: Boolean(elemento.disabled) ||
+                  elemento.getAttribute('aria-disabled') === 'true'
+              }));
+            """
+        )
+    except (WebDriverException, AttributeError):
+        return None
+
+    for controle in controles or []:
+        texto = chave_texto((controle or {}).get("texto", ""))
+        if any(
+            marcador in texto
+            for marcador in ("esgotado", "produto indisponivel", "avise-me")
+        ):
+            return False
+
+    for controle in controles or []:
+        texto = chave_texto((controle or {}).get("texto", ""))
+        if (
+            texto in {"comprar", "comprar agora"}
+            and not (controle or {}).get("desabilitado", False)
+        ):
+            return True
+
+    return None
+
+
 def pagina_da_loja_bloqueada(texto_body):
     texto = chave_texto(texto_body)
     return any(marcador in texto for marcador in MARCADORES_BLOQUEIO_LOJA)
@@ -381,6 +424,8 @@ def verificar_disponibilidade_loja(driver, oferta):
             continue
 
         disponibilidade = analisar_disponibilidade(texto_validacao)
+        if disponibilidade is None and loja == "Pichau":
+            disponibilidade = analisar_controle_de_compra_pichau(driver)
         if disponibilidade is False:
             return "INDISPONIVEL", url_final, "Produto indisponível na página da loja"
         if disponibilidade is True:
@@ -639,6 +684,9 @@ def extrair_todos_precos_vista_do_texto(texto):
     texto = chave_texto(texto)
     padroes = (
         r"r\$\s*([\d.,]+)\s*a\s+vista(?:\s+no\s+pix)?",
+        # A Terabyte insere "30% OFF" entre o valor PIX e "à vista".
+        r"r\$\s*([\d.,]+)(?:(?!r\$|\d{1,2}\s*x|parcel).){0,45}?"
+        r"a\s+vista",
         r"a\s+vista(?:(?!\d{1,2}\s*x|parcel|r\$).){0,40}?"
         r"r\$\s*([\d.,]+)",
         r"r\$\s*([\d.,]+)\s*no\s+pix",
