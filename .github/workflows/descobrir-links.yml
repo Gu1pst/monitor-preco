@@ -1,5 +1,5 @@
 name: Descobrir links das lojas
-run-name: Descobrir links v2026-08-18.2
+run-name: Descobrir links v2026-08-18.7
 
 on:
   schedule:
@@ -64,11 +64,13 @@ jobs:
           --catalogo "catalogo-${{ matrix.loja }}.json"
 
       - name: Guardar resultado
+        if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
           name: catalogo-${{ matrix.loja }}
           path: catalogo-${{ matrix.loja }}.json
           retention-days: 1
+          if-no-files-found: error
 
   publicar:
     name: Publicar catálogo
