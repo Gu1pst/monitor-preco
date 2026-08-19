@@ -22,7 +22,7 @@ from urllib3.util.retry import Retry
 
 
 GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
-MONITOR_VERSION = "2026-08-19.9"
+MONITOR_VERSION = "2026-08-19.10"
 CATALOGO_URLS_CAMINHO = Path(
     os.environ.get(
         "CATALOGO_URLS_CAMINHO",
@@ -50,8 +50,8 @@ DOMINIOS_DAS_LOJAS = {
 }
 
 PRODUTOS = [
-    {"categoria": "Ryzen 7 5700X", "precoMax": 900.00, "nome": "AMD Ryzen 7 5700X", "identidade": "100-100000926WOF", "urlPromotech": "https://promotech.app.br/produtos/processador/modelo/stvux7zj"},
-    {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "ADATA XPG Gammix D35 16GB Branco", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/bxfnyqmq"},
+    {"categoria": "Ryzen 7 5700X", "precoMax": 900.00, "nome": "AMD Ryzen 7 5700X", "identidade": "100-100000926WOF", "urlsConhecidas": {"Amazon": ["https://www.amazon.com.br/dp/B09VCHQHZ6"]}, "urlPromotech": "https://promotech.app.br/produtos/processador/modelo/stvux7zj"},
+    {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "ADATA XPG Gammix D35 16GB Branco", "urlsConhecidas": {"Amazon": ["https://www.amazon.com.br/dp/B0C6HW8M89"]}, "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/bxfnyqmq"},
     {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "ADATA XPG Gammix D35 16GB Preto", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/j07q19ey"},
     {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "Corsair Vengeance LPX 16GB Preto", "identidade": "CMK16GX4M1E3200C16", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/rrye6ky7"},
     {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "Kingston Fury Beast 16GB Preto KF432C16BB1/16", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/7op9shyp"},
@@ -70,7 +70,7 @@ PRODUTOS = [
     {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "Palit RTX 5060 Ti 16GB Infinity 3 OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/dznzlwqx"},
     {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB TUF", "identidade": "TUF-RTX5060TI-16G-GAMING", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/m590gakb"},
     {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB TUF OC", "identidade": "TUF-RTX5060TI-O16G-GAMING", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/2bleghqb"},
-    {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "MSI RTX 5060 Ti 16GB Ventus 3X OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/gqrsje4y"},
+    {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "MSI RTX 5060 Ti 16GB Ventus 3X OC", "urlsConhecidas": {"Amazon": ["https://www.amazon.com.br/dp/B0F38DDMG2"]}, "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/gqrsje4y"},
     {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB Prime", "identidade": "PRIME-RTX5060TI-16G", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/lzc32cvp"},
     {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB Prime OC", "identidade": "PRIME-RTX5060TI-O16G", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/sgxaixdw"},
 ]
