@@ -224,6 +224,27 @@ def adicionar_candidato(melhores, loja, item, href, representacao):
     canonica = url_canonica_produto(loja, href)
     if not canonica:
         return
+    caminho = normalizar(urlsplit(canonica).path)
+    if any(
+        termo in caminho
+        for termo in (
+            "kit upgrade", "computador", "pc gamer", "workstation",
+            "open box",
+        )
+    ):
+        return
+
+    if loja != "Amazon":
+        categoria = normalizar(item.get("categoria", ""))
+        if "memoria ram" in categoria:
+            termos_esperados = ("memoria",)
+        elif "ryzen" in categoria or "processador" in categoria:
+            termos_esperados = ("processador",)
+        else:
+            termos_esperados = ("placa de video", "vga")
+        if not any(termo in caminho for termo in termos_esperados):
+            return
+
     score = pontuar_identidade(
         item, f"{representacao} {urlsplit(canonica).path}"
     )
@@ -424,6 +445,8 @@ def avaliar_candidato(driver, loja, item, url, score_busca):
         oficial, _ = verificar_vendedor_amazon(driver, texto_body)
     elif loja == "KaBuM":
         oficial, _ = verificar_vendedor_kabum(texto_body)
+    if oficial is False:
+        return None
 
     disponibilidade = analisar_disponibilidade(texto_body)
     prioridade = score_pagina + min(score_busca, 100) / 10
@@ -540,12 +563,24 @@ def executar(lojas, caminho_catalogo, limite_produtos=None):
             f"\nResumo {loja}: {encontrados} descobertos, {mantidos} mantidos, "
             f"{ausentes} ausentes e {total_loja} links no catálogo."
         )
-        if total_loja == 0:
+        minimo_confiavel = {
+            "Amazon": 2,
+            "KaBuM": 2,
+            "Pichau": 5,
+            "Terabyte": 5,
+        }[loja]
+        if total_loja < minimo_confiavel:
             salvar_catalogo(caminho_catalogo, catalogo)
             raise RuntimeError(
-                f"A descoberta da {loja} terminou sem nenhum link; "
+                f"A descoberta da {loja} terminou com apenas {total_loja} "
+                f"link(s), abaixo do mínimo seguro de {minimo_confiavel}; "
                 "o job não será marcado como sucesso."
             )
+
+        processadas = catalogo.setdefault("lojasProcessadas", [])
+        if loja not in processadas:
+            processadas.append(loja)
+        salvar_catalogo(caminho_catalogo, catalogo)
 
     catalogo["atualizadoEm"] = agora
     salvar_catalogo(caminho_catalogo, catalogo)
