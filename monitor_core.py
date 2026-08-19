@@ -22,7 +22,7 @@ from urllib3.util.retry import Retry
 
 
 GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
-MONITOR_VERSION = "2026-08-17.5"
+MONITOR_VERSION = "2026-08-18.7"
 CATALOGO_URLS_CAMINHO = Path(
     os.environ.get(
         "CATALOGO_URLS_CAMINHO",
@@ -743,15 +743,75 @@ def extrair_preco_principal_da_loja(driver, loja):
         texto_body = driver.find_element(By.TAG_NAME, "body").text
     except WebDriverException:
         texto_body = ""
-    texto_principal = recortar_area_principal_do_produto(texto_body)
-    candidatos_texto = extrair_todos_precos_vista_do_texto(texto_principal)
+
+    textos_para_preco = [texto_body]
+    try:
+        html_loja = driver.page_source or ""
+    except (WebDriverException, AttributeError):
+        html_loja = ""
+    if html_loja:
+        textos_para_preco.append(
+            BeautifulSoup(html_loja, "html.parser").get_text(" ", strip=True)
+        )
+
+    textos_principais = [
+        recortar_area_principal_do_produto(texto)
+        for texto in textos_para_preco
+        if texto
+    ]
+    candidatos_texto = []
+    for texto in textos_principais:
+        candidatos_texto.extend(extrair_todos_precos_vista_do_texto(texto))
     preco_estruturado = extrair_preco_estruturado(driver)
 
+    preco_pix_calculado = None
+    if loja == "Terabyte" and preco_estruturado is not None:
+        texto_preco = chave_texto(" ".join(textos_principais))
+        parcelamento = extrair_parcelamento_do_texto(
+            texto_preco, preco_estruturado
+        )
+        desconto = re.search(
+            r"(\d{1,2}(?:[.,]\d+)?)\s*%\s*(?:de\s+)?desconto"
+            r"(?:(?!r\$).){0,100}?(?:pix|boleto)",
+            texto_preco,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if parcelamento is not None and desconto:
+            total_cartao = Decimal(str(parcelamento[0]))
+            estruturado = Decimal(str(preco_estruturado))
+            # A Terabyte publica o total do cartão como Offer.price. Só aplica
+            # o desconto quando os dois valores comprovadamente coincidem.
+            if abs(total_cartao - estruturado) <= Decimal("1.00"):
+                percentual = converter_preco_da_loja(desconto.group(1))
+                preco_pix = estruturado * (
+                    Decimal("1") - percentual / Decimal("100")
+                )
+                preco_pix_calculado = float(
+                    preco_pix.quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                )
+
     if candidatos_texto:
-        # Na Terabyte há um modal de compartilhamento com o total parcelado
-        # rotulado incorretamente como "à vista". O recorte do body e o menor
-        # valor rotulado preservam o PIX da área principal do produto.
+        # Na Terabyte, Offer.price costuma ser o total do cartão. O desconto
+        # PIX informado pela página impede que esse total seja salvo como vista.
+        if preco_pix_calculado is not None:
+            pix_decimal = Decimal(str(preco_pix_calculado))
+            tolerancia = max(
+                Decimal("2.00"), pix_decimal * Decimal("0.02")
+            )
+            candidatos_compativeis = [
+                preco
+                for preco in candidatos_texto
+                if abs(Decimal(str(preco)) - pix_decimal) <= tolerancia
+            ]
+            if candidatos_compativeis:
+                return min(candidatos_compativeis)
+            return preco_pix_calculado
         return min(candidatos_texto)
+
+    if preco_pix_calculado is not None:
+        return preco_pix_calculado
     return preco_estruturado
 
 
@@ -1180,6 +1240,19 @@ def enviar_sincronizacao_do_produto(sessao, item, lojas_encontradas):
     postar_webhook(sessao, pacote)
 
 
+def enviar_cadastro_do_produto(sessao, item):
+    """Garante a linha do produto mesmo quando nenhuma loja possui oferta."""
+    pacote = {
+        "nome": item["nome"],
+        "categoria": item["categoria"],
+        "tipo": tipo_do_produto(item),
+        "precoMax": item["precoMax"],
+        "status": "CADASTRAR",
+        "fonte": "Catálogo automático",
+    }
+    postar_webhook(sessao, pacote)
+
+
 def carregar_catalogo_urls(caminho=CATALOGO_URLS_CAMINHO):
     if not caminho.exists():
         raise RuntimeError(
@@ -1262,6 +1335,15 @@ def rotina_principal():
 
     for item in PRODUTOS:
         print(f"\nMapeando: {item['nome']}")
+        # Apenas um dos quatro jobs cria/mantém as linhas, evitando webhooks
+        # duplicados. As células continuam vazias quando não há oferta válida.
+        if not loja_alvo or loja_alvo == "Amazon":
+            try:
+                enviar_cadastro_do_produto(sessao, item)
+            except requests.RequestException as erro:
+                falhas_planilha += 1
+                print(f"  Falha ao garantir a linha do produto: {erro}")
+
         ofertas = []
         for loja in lojas:
             oferta = criar_oferta_do_catalogo(catalogo, item, loja)
