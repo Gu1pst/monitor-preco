@@ -1,5 +1,186 @@
+
+User attachment
+User attachment
+Segue o que deu
+
+terça-feira, 16:00
+
+Worked for 50s
+O GitHub ainda executou o workflow antigo. O print comprova:
+
+actions/setup-python@v5
+Etapa “Preparar o Chrome Stable”
+Comando sudo apt-get update
+Avisos de checkout@v4 e upload-artifact@v4
+Esses trechos não existem na versão corrigida.
+
+Faça assim:
+
+Vá em Code → .github → workflows → descobrir-links.yml.
+Clique no lápis.
+Apague todo o conteúdo.
+Cole o conteúdo deste arquivo: descobrir-links.yml.
+Faça o commit diretamente na main.
+Repita com monitorar-precos.yml.
+Inicie pelo botão Run workflow; não use Re-run jobs.
+A execução correta aparecerá com o título:
+
+Descobrir links v2026-08-18.2
+
+E terá uma etapa chamada:
+
+Detectar o Chrome do runner
+
+Se aparecer “Preparar o Chrome Stable” ou apt-get, o arquivo foi colocado na raiz do repositório ou em outra branch, e não substituiu o existente em .github/workflows/. As versões atualizadas usam Node.js 24 conforme as ações oficiais do checkout e setup-python.
+
+terça-feira, 16:01
+User attachment
+parece que foi agora
+
+terça-feira, 16:32
+Sim, agora funcionou certinho:
+
+As quatro lojas concluíram em verde.
+Quatro catálogos foram gerados.
+O catálogo consolidado foi publicado.
+Tempo total caiu de 45 minutos com cancelamento para 14min50s.
+Agora execute:
+
+Actions → Monitorar preços v2026-08-18.2 → Run workflow
+
+Ele deverá criar quatro tarefas paralelas e atualizar a planilha usando os links descobertos diretamente nas lojas.
+
+terça-feira, 16:32
+User attachment
+User attachment
+Ao verificar o "catalogo_urls.json" não apareceu nada da pichau;
+Os preços do Terabyte (Vista) estão errados;
+E também não apareceu todos os produtos que eu queria
+
+terça-feira, 16:49
+
+Worked for 23m 16s
+Corrigi os três problemas na versão 2026-08-18.7:
+
+A Pichau agora também é procurada nos dados internos da página e, se necessário, por busca externa. Se nenhum link for encontrado, o job ficará vermelho — não haverá mais falso sucesso.
+A Terabyte agora diferencia preço no PIX do total parcelado.
+Os 23 produtos permanecerão no catálogo e na planilha, mesmo que ainda não tenham ofertas; as células ficarão vazias.
+Atualize estes arquivos no repositório:
+
+descobrir_links.py
+monitor_core.py
+descobrir-links.yml
+monitorar-precos.yml
+Também substitua o código do Apps Script por AppsScript.gs e faça uma nova implantação mantendo a mesma URL do Web App.
+
+Depois:
+
+Execute Descobrir links das lojas.
+Confirme que aparece Descobrir links v2026-08-18.7.
+Abra o job da Pichau e confira o resumo com a quantidade descoberta.
+Verifique se catalogo_urls.json contém os 23 produtos.
+Execute Monitorar preços v2026-08-18.7.
+Na próxima execução, os valores incorretos já existentes da Terabyte serão sobrescritos ou apagados se a oferta não puder ser validada.
+
+terça-feira, 17:13
+User attachment
+User attachment
+User attachment
+Deu isso
+
+8:40
+
+Worked for 11 min 1 s
+O diagnóstico funcionou: a Amazon caiu por uma URL inválida presente no HTML, enquanto a busca da Pichau retornou zero resultados. Corrigi ambos na versão 2026-08-19.8.
+
+A Pichau agora usa o sitemap público indicado no robots.txt, que contém URLs diretas como a página do Ryzen 7 5700X.
+
+Atualize:
+
+descobrir_links.py
+monitor_core.py
+descobrir-links.yml
+monitorar-precos.yml
+Não é necessário atualizar novamente o Apps Script.
+
+Depois execute Descobrir links das lojas. Deve aparecer:
+
+Descobrir links v2026-08-19.8
+
+Resultado esperado:
+
+Amazon não deverá mais cair ao encontrar uma URL defeituosa.
+Pichau deve encontrar aproximadamente 18 produtos exatos.
+Kits, computadores completos e variantes erradas serão rejeitados.
+Os 23 produtos continuarão presentes no catálogo, mesmo sem link em alguma loja.
+Cinco produtos não foram encontrados exatamente no catálogo atual da Pichau: a Corsair com SKU CMK16GX4M1E3200C16, três XFX Swift e a ASUS TUF não-OC. Eles aparecerão na planilha com a Pichau vazia.
+
+8:51
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Outputs
+
+Create a file or site
+
+Sources
+
+
+codex-clipboard-69842055-e78e-4dd3-8d6f-daf6938c9155.png
+
+
+codex-clipboard-f637127c-fb51-4a32-ac9c-e2662e61e65f.png
+
+
+codex-clipboard-3a05b934-bb53-4416-9de7-5d782ca58c2d.png
+
+View all
+qu
+outputs
+monitorar-precos.yml
 name: Monitorar preços
-run-name: Monitorar preços v2026-08-18.7
+run-name: Monitorar preços v2026-08-19.8
 
 on:
   schedule:
