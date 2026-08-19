@@ -1,6 +1,6 @@
 {
   "versao": 1,
-  "atualizadoEm": "2026-08-18T19:25:19+00:00",
+  "atualizadoEm": "2026-08-19T04:17:15+00:00",
   "produtos": {
     "AMD Ryzen 7 5700X": {
       "Amazon": {
@@ -8,21 +8,21 @@
         "score": 84.71,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T15:36:17+00:00"
+        "descobertoEm": "2026-08-19T04:03:10+00:00"
       },
       "KaBuM": {
         "url": "https://www.kabum.com.br/produto/1059139/processador-amd-ryzen-7-5700x-socket-am4-3-4ghz-36mb",
         "score": 86.15,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:54+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/20937/upgrade1260",
         "score": 86.15,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": false,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "ADATA XPG Gammix D35 16GB Branco": {
@@ -31,14 +31,14 @@
         "score": 78.73,
         "vendedorOficialNaDescoberta": true,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:53+00:00"
+        "descobertoEm": "2026-08-19T04:03:10+00:00"
       },
       "KaBuM": {
         "url": "https://www.kabum.com.br/produto/1044857/memoria-ram-adata-xpg-gammix-d35-ddr4-16gb-3200mhz-branco-ax4u320016g16a-swhd35-",
         "score": 86.67,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:54+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "ADATA XPG Gammix D35 16GB Preto": {
@@ -47,7 +47,7 @@
         "score": 86.92,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:54+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "Corsair Vengeance LPX 16GB Preto": {
@@ -56,14 +56,14 @@
         "score": 86.4,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:54+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/39089/memoria-ddr4-corsair-vengeance-lpx-16gb-3200mhz-preto-cmk16gx4m1e3200c16",
         "score": 80.0,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": false,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "Kingston Fury Beast 16GB Preto KF432C16BB1/16": {
@@ -72,14 +72,14 @@
         "score": 93.33,
         "vendedorOficialNaDescoberta": true,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:54+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/19158/memoria-kingston-fury-beast-16gb-3200mhz-ddr4-cl16-preto-kf432c16bb116",
         "score": 82.59,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "Kingston Fury Beast 16GB Preto KF432C16BB/16": {
@@ -88,7 +88,7 @@
         "score": 83.25,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "Gigabyte RX 9060 XT 16GB Gaming OC": {
@@ -97,14 +97,14 @@
         "score": 86.36,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": null,
-        "descobertoEm": "2026-08-18T19:10:53+00:00"
+        "descobertoEm": "2026-08-19T04:03:10+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/35985/placa-de-video-gigabyte-amd-radeon-rx-9060-xt-gaming-oc-16gb-gddr6-fsr-ray-tracing-gv-r9060xtgaming-oc-16gd",
         "score": 85.83,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": false,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "Gigabyte RX 9060 XT 16GB Gaming OC ICE": {},
@@ -114,7 +114,14 @@
         "score": 85.83,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
+      },
+      "Amazon": {
+        "url": "https://www.amazon.com.br/dp/B0F7LTBFZF",
+        "score": 82.8,
+        "vendedorOficialNaDescoberta": null,
+        "disponivelNaDescoberta": true,
+        "descobertoEm": "2026-08-19T04:03:10+00:00"
       }
     },
     "XFX RX 9060 XT 16GB Swift White OC": {},
@@ -124,16 +131,16 @@
         "score": 84.44,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": null,
-        "descobertoEm": "2026-08-18T19:10:53+00:00"
+        "descobertoEm": "2026-08-19T04:03:10+00:00"
       }
     },
     "XFX RX 9060 XT 16GB Swift Triple Fan OC": {
       "Terabyte": {
-        "url": "https://www.terabyteshop.com.br/produto/38008/placa-de-video-xfx-swift-amd-radeon-rx-9060-xt-oc-triple-fan-16gb-gddr6-fsr-ray-tracing-rx-96ts316b7-open-box",
-        "score": 87.83,
+        "url": "https://www.terabyteshop.com.br/produto/36484/placa-de-video-xfx-swift-amd-radeon-rx-9060-xt-oc-triple-fan-16gb-gddr6-fsr-ray-tracing-rx-96ts316b7",
+        "score": 87.5,
         "vendedorOficialNaDescoberta": null,
-        "disponivelNaDescoberta": false,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "disponivelNaDescoberta": true,
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "ASUS RX 9060 XT 16GB TUF OC": {
@@ -142,7 +149,7 @@
         "score": 86.36,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "XFX RX 9060 XT 16GB Mercury OC": {
@@ -151,14 +158,14 @@
         "score": 83.78,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:53+00:00"
+        "descobertoEm": "2026-08-19T04:03:10+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/36479/placa-de-video-xfx-mercury-amd-radeon-rx-9060-xt-oc-gaming-edition-16gb-gddr6-fsr-ray-tracing-rx-96tmercb9",
         "score": 85.83,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": false,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "XFX RX 9060 XT 16GB Swift White Triple Fan OC": {
@@ -167,7 +174,7 @@
         "score": 88.0,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": false,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "Palit RTX 5060 Ti 16GB Infinity 3": {
@@ -176,14 +183,14 @@
         "score": 86.09,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:53+00:00"
+        "descobertoEm": "2026-08-19T04:03:10+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/36048/placa-de-video-palit-nvidia-geforce-rtx-5060-ti-infinity-3-16gb-gddr7-dlss-ray-tracing-ne7506t019t1-gb2061s",
         "score": 86.09,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "Gainward RTX 5060 Ti 16GB Python III": {
@@ -192,14 +199,14 @@
         "score": 84.83,
         "vendedorOficialNaDescoberta": false,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:54+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       },
       "Terabyte": {
         "url": "https://www.terabyteshop.com.br/produto/40483/placa-de-video-gainward-nvidia-geforce-rtx-5060-ti-python-iii-16gb-gddr7-dlss-ray-tracing-ne7506t019t1-gb2061t",
         "score": 86.67,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "Palit RTX 5060 Ti 16GB Infinity 3 OC": {
@@ -208,7 +215,7 @@
         "score": 87.27,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "ASUS RTX 5060 Ti 16GB TUF": {
@@ -217,7 +224,7 @@
         "score": 84.8,
         "vendedorOficialNaDescoberta": true,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:54+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "ASUS RTX 5060 Ti 16GB TUF OC": {
@@ -226,7 +233,7 @@
         "score": 86.36,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": false,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "MSI RTX 5060 Ti 16GB Ventus 3X OC": {
@@ -235,7 +242,7 @@
         "score": 86.96,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": false,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "ASUS RTX 5060 Ti 16GB Prime": {
@@ -244,7 +251,7 @@
         "score": 84.62,
         "vendedorOficialNaDescoberta": true,
         "disponivelNaDescoberta": true,
-        "descobertoEm": "2026-08-18T19:10:54+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     },
     "ASUS RTX 5060 Ti 16GB Prime OC": {
@@ -253,7 +260,7 @@
         "score": 86.09,
         "vendedorOficialNaDescoberta": null,
         "disponivelNaDescoberta": false,
-        "descobertoEm": "2026-08-18T19:10:50+00:00"
+        "descobertoEm": "2026-08-19T04:03:05+00:00"
       }
     }
   }
