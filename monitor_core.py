@@ -22,7 +22,7 @@ from urllib3.util.retry import Retry
 
 
 GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
-MONITOR_VERSION = "2026-08-19.8"
+MONITOR_VERSION = "2026-08-19.9"
 CATALOGO_URLS_CAMINHO = Path(
     os.environ.get(
         "CATALOGO_URLS_CAMINHO",
@@ -58,21 +58,21 @@ PRODUTOS = [
     {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "Kingston Fury Beast 16GB Preto KF432C16BB/16", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/fk07q2rg"},
     {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "Gigabyte RX 9060 XT 16GB Gaming OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/4x9dm8d4"},
     {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "Gigabyte RX 9060 XT 16GB Gaming OC ICE", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/kv7rix7p"},
-    {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "ASUS RX 9060 XT 16GB Prime OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/zmdicmsq"},
+    {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "ASUS RX 9060 XT 16GB Prime OC", "identidade": "PRIME-RX9060XT-O16G", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/zmdicmsq"},
     {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "XFX RX 9060 XT 16GB Swift White OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/477wijq6"},
     {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "ASRock RX 9060 XT 16GB Steel Legend OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/9mlqifpy"},
     {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "XFX RX 9060 XT 16GB Swift Triple Fan OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/outz1bfl"},
-    {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "ASUS RX 9060 XT 16GB TUF OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/w61jqfhy"},
+    {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "ASUS RX 9060 XT 16GB TUF OC", "identidade": "TUF-RX9060XT-O16G-GAMING", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/w61jqfhy"},
     {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "XFX RX 9060 XT 16GB Mercury OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/3sultokb"},
     {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "XFX RX 9060 XT 16GB Swift White Triple Fan OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/fubscl6a"},
     {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "Palit RTX 5060 Ti 16GB Infinity 3", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/620j23xx"},
     {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "Gainward RTX 5060 Ti 16GB Python III", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/a0j4png6"},
     {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "Palit RTX 5060 Ti 16GB Infinity 3 OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/dznzlwqx"},
-    {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB TUF", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/m590gakb"},
-    {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB TUF OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/2bleghqb"},
+    {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB TUF", "identidade": "TUF-RTX5060TI-16G-GAMING", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/m590gakb"},
+    {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB TUF OC", "identidade": "TUF-RTX5060TI-O16G-GAMING", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/2bleghqb"},
     {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "MSI RTX 5060 Ti 16GB Ventus 3X OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/gqrsje4y"},
-    {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB Prime", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/lzc32cvp"},
-    {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB Prime OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/sgxaixdw"},
+    {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB Prime", "identidade": "PRIME-RTX5060TI-16G", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/lzc32cvp"},
+    {"categoria": "RTX 5060 Ti 16GB", "precoMax": 3500.00, "nome": "ASUS RTX 5060 Ti 16GB Prime OC", "identidade": "PRIME-RTX5060TI-O16G", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/sgxaixdw"},
 ]
 
 
