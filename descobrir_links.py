@@ -1,4 +1,5 @@
 import argparse
+import base64
 import json
 import os
 import re
@@ -6,8 +7,9 @@ import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote, quote_plus, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, quote_plus, unquote, urlsplit, urlunsplit
 
+from bs4 import BeautifulSoup
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -25,6 +27,14 @@ from monitor_core import (
     verificar_vendedor_amazon,
     verificar_vendedor_kabum,
 )
+
+
+DOMINIOS_POR_LOJA = {
+    "Amazon": "amazon.com.br",
+    "KaBuM": "kabum.com.br",
+    "Pichau": "pichau.com.br",
+    "Terabyte": "terabyteshop.com.br",
+}
 
 
 MARCAS = {
@@ -57,7 +67,15 @@ def tokens(valor):
 
 
 def termo_de_busca(item):
-    return f"{item['nome']} {item.get('categoria', '')}".strip()
+    # Consultas longas fazem a busca da Pichau exigir palavras que nem sempre
+    # aparecem no título. A identidade completa continua sendo validada depois.
+    return item["nome"].strip()
+
+
+def termo_de_identidade(item):
+    # A busca usa um texto curto, mas a validação mantém categoria, capacidade,
+    # frequência e demais detalhes que distinguem variantes parecidas.
+    return f"{item['nome']} {item['categoria']}".strip()
 
 
 def url_de_busca(loja, termo):
@@ -103,7 +121,7 @@ def variantes_equivalentes(referencia, candidato, portugues, ingles):
 
 
 def pontuar_identidade(item, texto_candidato):
-    referencia = tokens(termo_de_busca(item))
+    referencia = tokens(termo_de_identidade(item))
     candidato = tokens(texto_candidato)
     if not referencia or not candidato:
         return -1
@@ -146,6 +164,94 @@ def texto_do_link(elemento):
     return " ".join(partes)
 
 
+def url_de_busca_externa(loja, item):
+    dominios = {
+        "Amazon": "amazon.com.br",
+        "KaBuM": "kabum.com.br",
+        "Pichau": "pichau.com.br",
+        "Terabyte": "terabyteshop.com.br",
+    }
+    consulta = f"site:{dominios[loja]} {termo_de_busca(item)}"
+    return f"https://www.bing.com/search?q={quote_plus(consulta)}"
+
+
+def decodificar_url_bing(valor):
+    if not valor:
+        return None
+    valor = unquote(valor)
+    if valor.startswith(("http://", "https://")):
+        return valor
+    if valor.startswith("a1"):
+        valor = valor[2:]
+    try:
+        valor += "=" * (-len(valor) % 4)
+        decodificado = base64.urlsafe_b64decode(valor).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return decodificado if decodificado.startswith("http") else None
+
+
+def destino_de_link_externo(href):
+    partes = urlsplit(href or "")
+    host = (partes.hostname or "").lower()
+    parametros = parse_qs(partes.query)
+    if "bing.com" in host:
+        return decodificar_url_bing((parametros.get("u") or [""])[0])
+    if "google." in host:
+        return (parametros.get("q") or [None])[0]
+    if "duckduckgo.com" in host:
+        return (parametros.get("uddg") or [None])[0]
+    return href
+
+
+def adicionar_candidato(melhores, loja, item, href, representacao):
+    canonica = url_canonica_produto(loja, href)
+    if not canonica:
+        return
+    score = pontuar_identidade(
+        item, f"{representacao} {urlsplit(canonica).path}"
+    )
+    if score < 45:
+        return
+    anterior = melhores.get(canonica)
+    if anterior is None or score > anterior:
+        melhores[canonica] = score
+
+
+def candidatos_do_html(driver, loja, item, melhores):
+    try:
+        html = driver.page_source or ""
+    except WebDriverException:
+        return
+    if not html:
+        return
+
+    soup = BeautifulSoup(html, "html.parser")
+    for link in soup.find_all("a", href=True):
+        adicionar_candidato(
+            melhores,
+            loja,
+            item,
+            destino_de_link_externo(link.get("href", "")),
+            f"{link.get_text(' ', strip=True)} {link.get('title', '')}",
+        )
+
+    # Algumas vitrines deixam as URLs somente no estado JSON da aplicação.
+    for correspondencia in re.finditer(
+        r'https?:\\?/\\?/[^"]+|"(?:url_key|urlKey|request_path)"\s*:\s*"([^"]+)"',
+        html,
+        re.IGNORECASE,
+    ):
+        bruto = correspondencia.group(1) or correspondencia.group(0)
+        bruto = bruto.replace("\\/", "/").strip('"')
+        if not urlsplit(bruto).scheme:
+            bruto = (
+                f"https://www.{DOMINIOS_POR_LOJA[loja]}/"
+                f"{bruto.lstrip('/')}"
+            )
+        adicionar_candidato(melhores, loja, item, bruto, bruto)
+
+
 def coletar_candidatos(driver, loja, item, limite=6):
     busca = url_de_busca(loja, termo_de_busca(item))
     print(f"    Busca: {busca}")
@@ -168,16 +274,19 @@ def coletar_candidatos(driver, loja, item, limite=6):
             href = link.get_attribute("href") or ""
         except WebDriverException:
             continue
-        canonica = url_canonica_produto(loja, href)
-        if not canonica:
-            continue
-        representacao = f"{texto_do_link(link)} {urlsplit(canonica).path}"
-        score = pontuar_identidade(item, representacao)
-        if score < 45:
-            continue
-        anterior = melhores.get(canonica)
-        if anterior is None or score > anterior:
-            melhores[canonica] = score
+        adicionar_candidato(melhores, loja, item, href, texto_do_link(link))
+
+    candidatos_do_html(driver, loja, item, melhores)
+
+    if not melhores:
+        busca_externa = url_de_busca_externa(loja, item)
+        print(f"    Busca da loja sem resultado; tentando índice externo: {busca_externa}")
+        try:
+            driver.get(busca_externa)
+        except TimeoutException:
+            pass
+        aguardar_conteudo_da_loja(driver, segundos=8)
+        candidatos_do_html(driver, loja, item, melhores)
 
     return sorted(melhores.items(), key=lambda par: par[1], reverse=True)[:limite]
 
@@ -300,8 +409,17 @@ def executar(lojas, caminho_catalogo, limite_produtos=None):
     produtos = PRODUTOS[:limite_produtos] if limite_produtos else PRODUTOS
     agora = datetime.now().astimezone().isoformat(timespec="seconds")
 
+    # O catálogo também funciona como a lista completa de itens monitorados.
+    # Portanto, um produto sem URL descoberta ainda precisa aparecer com {}.
+    for item in produtos:
+        catalogo["produtos"].setdefault(item["nome"], {})
+    salvar_catalogo(caminho_catalogo, catalogo)
+
     for loja in lojas:
         print(f"\n===== Descobrindo links da {loja} =====")
+        encontrados = 0
+        mantidos = 0
+        ausentes = 0
         navegador = iniciar_navegador()
         try:
             for item in produtos:
@@ -317,10 +435,13 @@ def executar(lojas, caminho_catalogo, limite_produtos=None):
                     resultado.pop("prioridade", None)
                     resultado["descobertoEm"] = agora
                     registros[loja] = resultado
+                    encontrados += 1
                     print(f"    Encontrado: {resultado['url']} (score {resultado['score']})")
                 elif loja in registros:
+                    mantidos += 1
                     print("    Não redescoberto; mantendo o link anterior.")
                 else:
+                    ausentes += 1
                     print("    Nenhum resultado seguro encontrado.")
                 salvar_catalogo(caminho_catalogo, catalogo)
                 time.sleep(1)
@@ -329,6 +450,22 @@ def executar(lojas, caminho_catalogo, limite_produtos=None):
                 navegador.quit()
             except WebDriverException:
                 pass
+
+        total_loja = sum(
+            1
+            for lojas_produto in catalogo["produtos"].values()
+            if isinstance(lojas_produto, dict) and loja in lojas_produto
+        )
+        print(
+            f"\nResumo {loja}: {encontrados} descobertos, {mantidos} mantidos, "
+            f"{ausentes} ausentes e {total_loja} links no catálogo."
+        )
+        if total_loja == 0:
+            salvar_catalogo(caminho_catalogo, catalogo)
+            raise RuntimeError(
+                f"A descoberta da {loja} terminou sem nenhum link; "
+                "o job não será marcado como sucesso."
+            )
 
     catalogo["atualizadoEm"] = agora
     salvar_catalogo(caminho_catalogo, catalogo)
