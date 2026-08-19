@@ -27,13 +27,6 @@ def limpar_registros_invalidos(produtos):
         for loja, registro in list(lojas.items()):
             if not isinstance(registro, dict):
                 continue
-            if (
-                loja in {"Amazon", "KaBuM"}
-                and registro.get("vendedorOficialNaDescoberta") is False
-            ):
-                lojas.pop(loja, None)
-                removidos += 1
-                continue
             try:
                 caminho = urlsplit(str(registro.get("url", ""))).path.lower()
             except ValueError:
