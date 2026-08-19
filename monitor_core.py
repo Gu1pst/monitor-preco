@@ -22,7 +22,7 @@ from urllib3.util.retry import Retry
 
 
 GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
-MONITOR_VERSION = "2026-08-18.7"
+MONITOR_VERSION = "2026-08-19.8"
 CATALOGO_URLS_CAMINHO = Path(
     os.environ.get(
         "CATALOGO_URLS_CAMINHO",
@@ -50,10 +50,10 @@ DOMINIOS_DAS_LOJAS = {
 }
 
 PRODUTOS = [
-    {"categoria": "Ryzen 7 5700X", "precoMax": 900.00, "nome": "AMD Ryzen 7 5700X", "urlPromotech": "https://promotech.app.br/produtos/processador/modelo/stvux7zj"},
+    {"categoria": "Ryzen 7 5700X", "precoMax": 900.00, "nome": "AMD Ryzen 7 5700X", "identidade": "100-100000926WOF", "urlPromotech": "https://promotech.app.br/produtos/processador/modelo/stvux7zj"},
     {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "ADATA XPG Gammix D35 16GB Branco", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/bxfnyqmq"},
     {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "ADATA XPG Gammix D35 16GB Preto", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/j07q19ey"},
-    {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "Corsair Vengeance LPX 16GB Preto", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/rrye6ky7"},
+    {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "Corsair Vengeance LPX 16GB Preto", "identidade": "CMK16GX4M1E3200C16", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/rrye6ky7"},
     {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "Kingston Fury Beast 16GB Preto KF432C16BB1/16", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/7op9shyp"},
     {"categoria": "Memória RAM 16GB 3200MHz", "precoMax": 700.00, "nome": "Kingston Fury Beast 16GB Preto KF432C16BB/16", "urlPromotech": "https://promotech.app.br/produtos/memoria-ram/modelo/fk07q2rg"},
     {"categoria": "RX 9060 XT 16GB", "precoMax": 3000.00, "nome": "Gigabyte RX 9060 XT 16GB Gaming OC", "urlPromotech": "https://promotech.app.br/produtos/placa-de-video/modelo/4x9dm8d4"},
@@ -284,7 +284,10 @@ def aguardar_informacao_do_vendedor(driver):
 
 
 def dominio_compativel_com_loja(loja, url):
-    hostname = (urlsplit(url).hostname or "").lower().rstrip(".")
+    try:
+        hostname = (urlsplit(url).hostname or "").lower().rstrip(".")
+    except (TypeError, ValueError):
+        return False
     return any(
         hostname == dominio or hostname.endswith(f".{dominio}")
         for dominio in DOMINIOS_DAS_LOJAS.get(loja, ())
