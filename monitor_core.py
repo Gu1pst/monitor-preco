@@ -22,7 +22,7 @@ from urllib3.util.retry import Retry
 
 
 GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
-MONITOR_VERSION = "2026-08-19.10"
+MONITOR_VERSION = "2026-08-19.11"
 CATALOGO_URLS_CAMINHO = Path(
     os.environ.get(
         "CATALOGO_URLS_CAMINHO",
@@ -1290,6 +1290,10 @@ def obter_url_do_catalogo(catalogo, item, loja):
 
 def criar_oferta_do_catalogo(catalogo, item, loja):
     url = obter_url_do_catalogo(catalogo, item, loja)
+    if not url:
+        conhecidas = item.get("urlsConhecidas", {}).get(loja, [])
+        if conhecidas:
+            url = conhecidas[0]
     if not url or not dominio_compativel_com_loja(loja, url):
         return None
     return {
