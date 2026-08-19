@@ -1,5 +1,5 @@
 name: Monitorar preços
-run-name: Monitorar preços v2026-08-19.11
+run-name: Monitorar preços v2026-08-19.12
 
 on:
   schedule:
