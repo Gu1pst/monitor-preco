@@ -2,6 +2,7 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def carregar(caminho):
@@ -14,16 +15,59 @@ def carregar(caminho):
     return dados
 
 
+def limpar_registros_invalidos(produtos):
+    removidos = 0
+    termos_proibidos = (
+        "kit-upgrade", "upgrade", "pc-gamer", "computador",
+        "workstation", "open-box",
+    )
+    for lojas in produtos.values():
+        if not isinstance(lojas, dict):
+            continue
+        for loja, registro in list(lojas.items()):
+            if not isinstance(registro, dict):
+                continue
+            if (
+                loja in {"Amazon", "KaBuM"}
+                and registro.get("vendedorOficialNaDescoberta") is False
+            ):
+                lojas.pop(loja, None)
+                removidos += 1
+                continue
+            try:
+                caminho = urlsplit(str(registro.get("url", ""))).path.lower()
+            except ValueError:
+                caminho = ""
+            if any(termo in caminho for termo in termos_proibidos):
+                lojas.pop(loja, None)
+                removidos += 1
+    return removidos
+
+
 def mesclar(base, arquivos):
     resultado = carregar(base)
     resultado["versao"] = 1
+    removidos = limpar_registros_invalidos(resultado["produtos"])
+    if removidos:
+        print(f"Limpeza defensiva removeu {removidos} link(s) inválido(s).")
     for caminho in arquivos:
         parcial = carregar(caminho)
+        lojas_processadas = parcial.get("lojasProcessadas", [])
+        if not lojas_processadas:
+            print(f"Ignorando catálogo parcial não validado: {caminho.name}")
+            continue
+        # Um catálogo parcial validado substitui completamente aquela loja.
+        # Assim, links antigos, marketplace e produtos não redescobertos somem.
+        for loja in lojas_processadas:
+            for lojas_produto in resultado["produtos"].values():
+                if isinstance(lojas_produto, dict):
+                    lojas_produto.pop(loja, None)
         for nome, lojas in parcial["produtos"].items():
             if not isinstance(lojas, dict):
                 continue
             destino = resultado["produtos"].setdefault(nome, {})
             destino.update(lojas)
+    resultado.pop("lojasProcessadas", None)
     resultado["atualizadoEm"] = datetime.now().astimezone().isoformat(
         timespec="seconds"
     )
