@@ -74,7 +74,7 @@ def tokens(valor):
 def termo_de_busca(item):
     # Consultas longas fazem a busca da Pichau exigir palavras que nem sempre
     # aparecem no título. A identidade completa continua sendo validada depois.
-    return item["nome"].strip()
+    return f"{item['nome']} {item.get('identidade', '')}".strip()
 
 
 def termo_de_identidade(item):
@@ -86,6 +86,16 @@ def termo_de_identidade(item):
 def identidade_extra_compativel(item, texto_candidato):
     identidade = tokens(item.get("identidade", ""))
     return not identidade or identidade.issubset(tokens(texto_candidato))
+
+
+def url_conhecida_do_item(item, loja, url):
+    canonica = url_canonica_produto(loja, url)
+    if not canonica:
+        return False
+    return any(
+        url_canonica_produto(loja, conhecida) == canonica
+        for conhecida in item.get("urlsConhecidas", {}).get(loja, [])
+    )
 
 
 def url_de_busca(loja, termo):
@@ -343,6 +353,11 @@ def candidatos_do_sitemap_pichau(item, melhores):
 
 def coletar_candidatos(driver, loja, item, limite=6):
     melhores = {}
+    for url_conhecida in item.get("urlsConhecidas", {}).get(loja, []):
+        canonica = url_canonica_produto(loja, url_conhecida)
+        if canonica:
+            melhores[canonica] = 100.0
+
     if loja == "Pichau":
         try:
             candidatos_do_sitemap_pichau(item, melhores)
@@ -434,7 +449,10 @@ def avaliar_candidato(driver, loja, item, url, score_busca):
         return None
 
     texto_produto = f"{ler_texto_produto(driver)} {urlsplit(canonica).path}"
-    if not identidade_extra_compativel(item, texto_produto):
+    if (
+        not url_conhecida_do_item(item, loja, canonica)
+        and not identidade_extra_compativel(item, texto_produto)
+    ):
         return None
     score_pagina = pontuar_identidade(item, texto_produto)
     if score_pagina < 45:
@@ -445,9 +463,6 @@ def avaliar_candidato(driver, loja, item, url, score_busca):
         oficial, _ = verificar_vendedor_amazon(driver, texto_body)
     elif loja == "KaBuM":
         oficial, _ = verificar_vendedor_kabum(texto_body)
-    if oficial is False:
-        return None
-
     disponibilidade = analisar_disponibilidade(texto_body)
     prioridade = score_pagina + min(score_busca, 100) / 10
     if oficial is True:
