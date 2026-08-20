@@ -22,7 +22,7 @@ from urllib3.util.retry import Retry
 
 
 GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
-MONITOR_VERSION = "2026-08-19.12"
+MONITOR_VERSION = "2026-08-19.13"
 CATALOGO_URLS_CAMINHO = Path(
     os.environ.get(
         "CATALOGO_URLS_CAMINHO",
@@ -30,7 +30,7 @@ CATALOGO_URLS_CAMINHO = Path(
     )
 )
 TIMEOUT_PAGINA_SEGUNDOS = 15
-TIMEOUT_WEBHOOK_SEGUNDOS = 20
+TIMEOUT_WEBHOOK_SEGUNDOS = 70
 TIMEOUT_LOJA_SEGUNDOS = 18
 TIMEOUT_PROMOTECH_CHROME_SEGUNDOS = 30
 LOJAS_COM_VALIDACAO_DE_VENDEDOR = {"Amazon", "KaBuM"}
@@ -323,18 +323,33 @@ def analisar_controle_de_compra_pichau(driver):
     try:
         controles = driver.execute_script(
             """
-            return Array.from(document.querySelectorAll('button, a, [role="button"]'))
+            const seletores = [
+              'button', 'a', 'input', '[role="button"]',
+              '[class*="button"]', '[class*="Button"]',
+              '[class*="buy"]', '[class*="Buy"]',
+              '[class*="cart"]', '[class*="Cart"]'
+            ].join(',');
+            return Array.from(document.querySelectorAll(seletores))
               .filter((elemento) => {
                 const estilo = window.getComputedStyle(elemento);
                 const caixa = elemento.getBoundingClientRect();
                 return estilo.display !== 'none' && estilo.visibility !== 'hidden' &&
                        caixa.width > 0 && caixa.height > 0;
               })
-              .map((elemento) => ({
-                texto: (elemento.innerText || elemento.textContent || '').trim(),
-                desabilitado: Boolean(elemento.disabled) ||
-                  elemento.getAttribute('aria-disabled') === 'true'
-              }));
+              .map((elemento) => {
+                const antes = window.getComputedStyle(elemento, '::before').content || '';
+                const depois = window.getComputedStyle(elemento, '::after').content || '';
+                const partes = [
+                  elemento.innerText, elemento.textContent, elemento.value,
+                  elemento.getAttribute('aria-label'), elemento.getAttribute('title'),
+                  elemento.getAttribute('alt'), antes, depois
+                ];
+                return {
+                  texto: partes.filter(Boolean).join(' ').replace(/["']/g, '').trim(),
+                  desabilitado: Boolean(elemento.disabled) ||
+                    elemento.getAttribute('aria-disabled') === 'true'
+                };
+              });
             """
         )
     except (WebDriverException, AttributeError):
@@ -356,6 +371,66 @@ def analisar_controle_de_compra_pichau(driver):
         ):
             return True
 
+    return None
+
+
+def analisar_disponibilidade_estruturada(html):
+    """Lê schema.org/JSON-LD do produto sem depender do texto visual da página."""
+    if not html:
+        return None
+
+    soup = BeautifulSoup(html, "html.parser")
+    valores = []
+
+    for elemento in soup.select("[itemprop='availability']"):
+        valores.extend(
+            elemento.get(atributo, "")
+            for atributo in ("content", "href")
+            if elemento.get(atributo)
+        )
+        texto = elemento.get_text(" ", strip=True)
+        if texto:
+            valores.append(texto)
+
+    def tipos_do_json(valor):
+        tipo = valor.get("@type") if isinstance(valor, dict) else None
+        if isinstance(tipo, list):
+            return {chave_texto(str(item)) for item in tipo}
+        return {chave_texto(str(tipo))} if tipo else set()
+
+    def coletar_ofertas(valor):
+        if isinstance(valor, dict):
+            tipos = tipos_do_json(valor)
+            if "offer" in tipos or "aggregateoffer" in tipos:
+                disponibilidade = valor.get("availability")
+                if disponibilidade:
+                    valores.append(str(disponibilidade))
+            for filho in valor.values():
+                coletar_ofertas(filho)
+        elif isinstance(valor, list):
+            for filho in valor:
+                coletar_ofertas(filho)
+
+    for script in soup.select("script[type='application/ld+json']"):
+        try:
+            dados = json.loads(script.string or script.get_text() or "")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        coletar_ofertas(dados)
+
+    chaves = [chave_texto(valor).replace("_", "") for valor in valores]
+    if any(
+        marcador in valor
+        for valor in chaves
+        for marcador in ("outofstock", "soldout", "indisponivel", "esgotado")
+    ):
+        return False
+    if any(
+        marcador in valor
+        for valor in chaves
+        for marcador in ("instock", "limitedavailability", "disponivel")
+    ):
+        return True
     return None
 
 
@@ -424,6 +499,8 @@ def verificar_disponibilidade_loja(driver, oferta):
             continue
 
         disponibilidade = analisar_disponibilidade(texto_validacao)
+        if disponibilidade is None and loja == "Pichau":
+            disponibilidade = analisar_disponibilidade_estruturada(html_loja)
         if disponibilidade is None and loja == "Pichau":
             disponibilidade = analisar_controle_de_compra_pichau(driver)
         if disponibilidade is False:
@@ -1178,7 +1255,8 @@ def extrair_ofertas_promotech(sessao, url_promotech, navegador=None):
 
 
 def postar_webhook(sessao, pacote):
-    for tentativa in range(1, 4):
+    ultima_falha = None
+    for tentativa in range(1, 6):
         try:
             resposta = sessao.post(
                 GOOGLE_WEBHOOK_URL,
@@ -1198,11 +1276,24 @@ def postar_webhook(sessao, pacote):
                 raise requests.RequestException(
                     f"Apps Script recusou o registro: {retorno['erro']}"
                 )
+            if retorno.get("sucesso") is not True:
+                raise requests.RequestException(
+                    "O Apps Script não confirmou a gravação"
+                )
             return
-        except requests.RequestException:
-            if tentativa == 3:
+        except requests.RequestException as erro:
+            ultima_falha = erro
+            if tentativa == 5:
                 raise
-            time.sleep(2)
+            espera = min(2 ** tentativa, 15)
+            print(
+                f"    Webhook não confirmou a gravação (tentativa {tentativa}/5); "
+                f"nova tentativa em {espera}s"
+            )
+            time.sleep(espera)
+
+    if ultima_falha is not None:
+        raise ultima_falha
 
 
 def tipo_do_produto(item):
@@ -1403,17 +1494,13 @@ def rotina_principal():
         for loja in lojas:
             oferta = criar_oferta_do_catalogo(catalogo, item, loja)
             if oferta is None:
-                print(f"  {loja}: link ainda não descoberto; célula será limpa")
-                try:
-                    enviar_remocao_de_oferta(
-                        sessao,
-                        item,
-                        {"loja": loja, "href": ""},
-                        "Link não encontrado pela descoberta automática",
-                    )
-                except requests.RequestException as erro:
-                    falhas_planilha += 1
-                    print(f"    Falha ao limpar a célula: {erro}")
+                # A descoberta não encontrar um link não prova que a oferta
+                # deixou de existir. Preserva o último valor válido; a célula
+                # só é limpa após marketplace ou indisponibilidade confirmados.
+                print(
+                    f"  {loja}: link ainda não descoberto; "
+                    "último valor válido será preservado"
+                )
                 continue
             ofertas.append(oferta)
 
@@ -1439,7 +1526,7 @@ def rotina_principal():
                         falhas_planilha += 1
                         print(
                             "    Falha ao registrar indisponibilidade na planilha "
-                            f"após 3 tentativas: {erro}"
+                            f"após 5 tentativas: {erro}"
                         )
                     continue
 
@@ -1452,7 +1539,7 @@ def rotina_principal():
                             falhas_planilha += 1
                             print(
                                 "    Falha ao remover marketplace da planilha "
-                                f"após 3 tentativas: {erro}"
+                                f"após 5 tentativas: {erro}"
                             )
                     else:
                         # CAPTCHA, timeout ou bloco ausente não provam que a
@@ -1478,7 +1565,7 @@ def rotina_principal():
                         falhas_planilha += 1
                         print(
                             "    Falha ao registrar indisponibilidade na planilha "
-                            f"após 3 tentativas: {erro}"
+                            f"após 5 tentativas: {erro}"
                         )
                     continue
 
@@ -1491,7 +1578,7 @@ def rotina_principal():
                         falhas_planilha += 1
                         print(
                             "    Falha ao remover oferta divergente da planilha "
-                            f"após 3 tentativas: {erro}"
+                            f"após 5 tentativas: {erro}"
                         )
                     continue
 
@@ -1543,7 +1630,7 @@ def rotina_principal():
                 ofertas_salvas += 1
             except requests.RequestException as erro:
                 falhas_planilha += 1
-                print(f"    Falha ao salvar na planilha após 3 tentativas: {erro}")
+                print(f"    Falha ao salvar na planilha após 5 tentativas: {erro}")
 
     try:
         navegador.quit()
