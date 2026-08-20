@@ -1,5 +1,5 @@
 name: Monitorar preços
-run-name: Monitorar preços v2026-08-19.12
+run-name: Monitorar preços v2026-08-19.13
 
 on:
   schedule:
@@ -22,7 +22,9 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      max-parallel: 4
+      # O Apps Script grava numa única planilha. Executar uma loja por vez evita
+      # timeouts e respostas "Ocupado" que deixavam células vazias.
+      max-parallel: 1
       matrix:
         loja: [Amazon, KaBuM, Pichau, Terabyte]
 
