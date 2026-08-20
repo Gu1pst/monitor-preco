@@ -22,7 +22,7 @@ from urllib3.util.retry import Retry
 
 
 GOOGLE_WEBHOOK_URL = os.environ.get("GOOGLE_WEBHOOK_URL", "").strip()
-MONITOR_VERSION = "2026-08-19.13"
+MONITOR_VERSION = "2026-08-20.14"
 CATALOGO_URLS_CAMINHO = Path(
     os.environ.get(
         "CATALOGO_URLS_CAMINHO",
@@ -33,6 +33,10 @@ TIMEOUT_PAGINA_SEGUNDOS = 15
 TIMEOUT_WEBHOOK_SEGUNDOS = 70
 TIMEOUT_LOJA_SEGUNDOS = 18
 TIMEOUT_PROMOTECH_CHROME_SEGUNDOS = 30
+TIMEOUT_LEITOR_PICHAU_SEGUNDOS = 45
+LEITOR_PICHAU_PREFIXO = "https://r.jina.ai/"
+INTERVALO_LEITOR_PICHAU_SEGUNDOS = 3.2
+_ULTIMA_REQUISICAO_LEITOR_PICHAU = 0.0
 LOJAS_COM_VALIDACAO_DE_VENDEDOR = {"Amazon", "KaBuM"}
 
 LOJAS_VALIDAS = {
@@ -319,37 +323,83 @@ def analisar_disponibilidade(texto_body):
 
 
 def analisar_controle_de_compra_pichau(driver):
-    """Lê o botão principal da Pichau mesmo quando ele não aparece no body.text."""
+    """Lê o controle principal inclusive dentro de Shadow DOM/iframes."""
     try:
         controles = driver.execute_script(
             """
-            const seletores = [
-              'button', 'a', 'input', '[role="button"]',
-              '[class*="button"]', '[class*="Button"]',
-              '[class*="buy"]', '[class*="Buy"]',
-              '[class*="cart"]', '[class*="Cart"]'
-            ].join(',');
-            return Array.from(document.querySelectorAll(seletores))
-              .filter((elemento) => {
-                const estilo = window.getComputedStyle(elemento);
-                const caixa = elemento.getBoundingClientRect();
-                return estilo.display !== 'none' && estilo.visibility !== 'hidden' &&
-                       caixa.width > 0 && caixa.height > 0;
-              })
-              .map((elemento) => {
-                const antes = window.getComputedStyle(elemento, '::before').content || '';
-                const depois = window.getComputedStyle(elemento, '::after').content || '';
+            const encontrados = [];
+            const raizes = [document];
+            const visitadas = new Set();
+            const palavras = /comprar|esgotado|indispon.vel|avise(?:-me)?/i;
+
+            while (raizes.length && encontrados.length < 100) {
+              const raiz = raizes.shift();
+              if (!raiz || visitadas.has(raiz)) continue;
+              visitadas.add(raiz);
+
+              let elementos = [];
+              try { elementos = Array.from(raiz.querySelectorAll('*')); }
+              catch (_) { continue; }
+
+              for (const elemento of elementos) {
+                if (elemento.shadowRoot) raizes.push(elemento.shadowRoot);
+                if (elemento.tagName === 'IFRAME') {
+                  try {
+                    if (elemento.contentDocument) raizes.push(elemento.contentDocument);
+                  } catch (_) {}
+                }
+
+                let interativo = false;
+                try {
+                  interativo = elemento.matches([
+                    'button', 'a', 'input', '[role="button"]',
+                    '[class*="buy"]', '[class*="Buy"]',
+                    '[class*="cart"]', '[class*="Cart"]',
+                    '[class*="stock"]', '[class*="Stock"]',
+                    '[class*="available"]', '[class*="Available"]'
+                  ].join(','));
+                } catch (_) {}
+                const textoDireto = Array.from(elemento.childNodes || [])
+                  .filter((no) => no.nodeType === Node.TEXT_NODE)
+                  .map((no) => no.textContent || '').join(' ').trim();
+                if (!interativo && !palavras.test(textoDireto)) continue;
+
                 const partes = [
-                  elemento.innerText, elemento.textContent, elemento.value,
-                  elemento.getAttribute('aria-label'), elemento.getAttribute('title'),
-                  elemento.getAttribute('alt'), antes, depois
+                  textoDireto,
+                  interativo ? elemento.innerText : '', elemento.value,
+                  elemento.getAttribute('aria-label'),
+                  elemento.getAttribute('title'),
+                  elemento.getAttribute('alt'),
+                  elemento.getAttribute('data-testid'),
+                  elemento.getAttribute('class')
                 ];
-                return {
-                  texto: partes.filter(Boolean).join(' ').replace(/["']/g, '').trim(),
+                const texto = partes.filter(Boolean).join(' ')
+                  .replace(/["']/g, ' ').trim();
+                if (!palavras.test(texto)) continue;
+
+                let visivel = false;
+                let proximoDoTopo = false;
+                try {
+                  const estilo = window.getComputedStyle(elemento);
+                  const caixa = elemento.getBoundingClientRect();
+                  visivel = estilo.display !== 'none' &&
+                    estilo.visibility !== 'hidden' &&
+                    caixa.width > 0 && caixa.height > 0;
+                  proximoDoTopo = caixa.top < window.innerHeight * 1.6 &&
+                    caixa.bottom > -100;
+                } catch (_) {}
+
+                encontrados.push({
+                  texto,
+                  visivel,
+                  proximoDoTopo,
                   desabilitado: Boolean(elemento.disabled) ||
-                    elemento.getAttribute('aria-disabled') === 'true'
-                };
-              });
+                    elemento.getAttribute('aria-disabled') === 'true' ||
+                    elemento.hasAttribute('disabled')
+                });
+              }
+            }
+            return encontrados;
             """
         )
     except (WebDriverException, AttributeError):
@@ -357,16 +407,21 @@ def analisar_controle_de_compra_pichau(driver):
 
     for controle in controles or []:
         texto = chave_texto((controle or {}).get("texto", ""))
-        if any(
-            marcador in texto
-            for marcador in ("esgotado", "produto indisponivel", "avise-me")
+        if (
+            (controle or {}).get("proximoDoTopo", False)
+            and any(
+                marcador in texto
+                for marcador in ("esgotado", "produto indisponivel", "avise-me")
+            )
         ):
             return False
 
     for controle in controles or []:
         texto = chave_texto((controle or {}).get("texto", ""))
         if (
-            texto in {"comprar", "comprar agora"}
+            (controle or {}).get("visivel", False)
+            and (controle or {}).get("proximoDoTopo", False)
+            and re.search(r"\bcomprar(?:\s+agora)?\b", texto)
             and not (controle or {}).get("desabilitado", False)
         ):
             return True
@@ -452,10 +507,66 @@ def aguardar_conteudo_da_loja(driver, segundos=12):
     time.sleep(2)
 
 
-def verificar_disponibilidade_loja(driver, oferta):
+def obter_texto_pichau_por_leitor(sessao, url):
+    """Usa um leitor web quando a Pichau entrega HTML vazio ao runner."""
+    global _ULTIMA_REQUISICAO_LEITOR_PICHAU
+
+    # O acesso público sem chave possui limite por minuto. Espaçar as chamadas
+    # mantém a tarefa abaixo desse limite mesmo quando todos os produtos tiverem
+    # um link da Pichau no catálogo.
+    decorrido = perf_counter() - _ULTIMA_REQUISICAO_LEITOR_PICHAU
+    espera = INTERVALO_LEITOR_PICHAU_SEGUNDOS - decorrido
+    if espera > 0:
+        time.sleep(espera)
+    _ULTIMA_REQUISICAO_LEITOR_PICHAU = perf_counter()
+
+    resposta = sessao.get(
+        LEITOR_PICHAU_PREFIXO + limpar_url_final_loja(url),
+        headers={
+            "User-Agent": "python-requests/2",
+            "Accept": "text/plain",
+            "X-Return-Format": "text",
+            "X-No-Cache": "true",
+        },
+        timeout=TIMEOUT_LEITOR_PICHAU_SEGUNDOS,
+    )
+    resposta.raise_for_status()
+    resposta.encoding = "utf-8"
+    texto = normalizar_texto(resposta.text)
+    if "pichau" not in chave_texto(texto):
+        raise RuntimeError("O leitor não retornou a página da Pichau")
+    return texto
+
+
+def verificar_disponibilidade_loja(driver, oferta, sessao=None):
     """Valida disponibilidade diretamente na Pichau/Terabyte."""
     loja = oferta["loja"]
     url = oferta["href"]
+
+    # A Pichau responde com um documento HTML vazio aos IPs do GitHub Actions.
+    # O leitor público renderiza a mesma URL e devolve o texto da página oficial,
+    # incluindo estoque, preço PIX e todas as parcelas. Ele é usado somente para
+    # a Pichau e sem enviar cookies, credenciais ou dados da planilha.
+    if loja == "Pichau" and sessao is not None:
+        try:
+            texto_leitor = obter_texto_pichau_por_leitor(sessao, url)
+        except (requests.RequestException, RuntimeError) as erro:
+            print(f"    Leitor da Pichau indisponível: {erro}")
+        else:
+            disponibilidade = analisar_disponibilidade(texto_leitor)
+            if disponibilidade is not None:
+                oferta["_texto_loja"] = texto_leitor
+                if disponibilidade:
+                    return (
+                        "DISPONIVEL",
+                        url,
+                        "Produto disponível confirmado na página renderizada da Pichau",
+                    )
+                return (
+                    "INDISPONIVEL",
+                    url,
+                    "Produto indisponível confirmado na página renderizada da Pichau",
+                )
 
     for tentativa in range(1, 3):
         try:
@@ -507,26 +618,6 @@ def verificar_disponibilidade_loja(driver, oferta):
             return "INDISPONIVEL", url_final, "Produto indisponível na página da loja"
         if disponibilidade is True:
             return "DISPONIVEL", url_final, "Produto disponível na página da loja"
-
-        # Algumas páginas da Pichau não expõem o texto do botão de compra ao
-        # Selenium, mas exibem normalmente preço e condição válida de cartão.
-        preco_temporario = oferta.get("preco_vista")
-        if preco_temporario is None:
-            preco_temporario = extrair_preco_principal_da_loja(driver, loja)
-        oferta_para_teste = dict(oferta)
-        oferta_para_teste["preco_vista"] = preco_temporario
-        if (
-            preco_temporario is not None
-            and extrair_preco_parcelado_da_loja(
-                driver, oferta_para_teste
-            )
-            is not None
-        ):
-            return (
-                "DISPONIVEL",
-                url_final,
-                "Oferta ativa confirmada pela condição de parcelamento",
-            )
 
         if tentativa == 2:
             return "INCONCLUSIVO", url_final, f"A {loja} não exibiu a disponibilidade do produto"
@@ -1065,6 +1156,14 @@ def extrair_preco_parcelado_da_loja(driver, oferta):
     if resultado is not None:
         return resultado
 
+    texto_fallback = oferta.get("_texto_loja", "")
+    if texto_fallback:
+        resultado = extrair_parcelamento_do_texto(
+            texto_fallback, preco_vista
+        )
+        if resultado is not None:
+            return resultado
+
     # Último recurso exclusivo da Pichau. Os cards monitorados informam o total
     # para 12x; calculamos apenas o valor unitário que será mostrado na planilha.
     # Esta regra só roda depois de confirmar o domínio e a ausência de marcador
@@ -1552,7 +1651,7 @@ def rotina_principal():
 
             else:
                 status_loja, url_final, motivo = verificar_disponibilidade_loja(
-                    navegador, oferta
+                    navegador, oferta, sessao
                 )
                 oferta["href"] = limpar_url_final_loja(url_final)
 
@@ -1592,6 +1691,10 @@ def rotina_principal():
             preco_loja = extrair_preco_principal_da_loja(
                 navegador, oferta["loja"]
             )
+            if preco_loja is None and oferta.get("_texto_loja"):
+                preco_loja = extrair_preco_vista_do_texto(
+                    oferta["_texto_loja"]
+                )
             if preco_loja is None:
                 validacoes_inconclusivas += 1
                 print(
