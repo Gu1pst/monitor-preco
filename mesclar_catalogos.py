@@ -49,12 +49,9 @@ def mesclar(base, arquivos):
         if not lojas_processadas:
             print(f"Ignorando catálogo parcial não validado: {caminho.name}")
             continue
-        # Um catálogo parcial validado substitui completamente aquela loja.
-        # Assim, links antigos, marketplace e produtos não redescobertos somem.
-        for loja in lojas_processadas:
-            for lojas_produto in resultado["produtos"].values():
-                if isinstance(lojas_produto, dict):
-                    lojas_produto.pop(loja, None)
+        # A descoberta é incremental. Uma busca sem resultado não prova que o
+        # produto saiu da loja: bloqueios e mudanças no HTML podem esconder
+        # temporariamente um link válido. Só substituímos o que foi encontrado.
         for nome, lojas in parcial["produtos"].items():
             if not isinstance(lojas, dict):
                 continue
